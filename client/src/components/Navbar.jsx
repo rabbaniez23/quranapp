@@ -23,7 +23,7 @@ const Navbar = () => {
           {/* Menu Links (Desktop) */}
           <div className="hidden md:flex items-center gap-1">
             
-            <Link to="/quran" className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isActive('/quran')}`}>
+            <Link to="/pilih-surat" className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isActive('/pilih-surat')}`}>
               <Book className="w-4 h-4" /> Quran
             </Link>
 

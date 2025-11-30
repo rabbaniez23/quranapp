@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import QuranDigital from './pages/QuranDigital';
 import CekHafalan from './pages/CekHafalan';
 import MushafHafalan from './pages/MushafHafalan';
+import PilihSurat from './pages/PilihSurat';
 
 // Import Halaman BARU
 import HaditsPage from './pages/HaditsPage';
@@ -31,13 +32,14 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             
             {/* Fitur Utama */}
-            <Route path="/quran" element={<QuranDigital />} />
+            <Route path="/quran-digital" element={<QuranDigital />} />
             <Route path="/cek-hafalan" element={<MushafHafalan />} />
             
             {/* Fitur Tambahan */}
             <Route path="/hadits" element={<HaditsPage />} />
             <Route path="/artikel" element={<ArtikelPage />} />
             <Route path="/jadwal-sholat" element={<JadwalSholat />} />
+            <Route path="/pilih-surat" element={<PilihSurat />} />
           </Routes>
         </div>
 

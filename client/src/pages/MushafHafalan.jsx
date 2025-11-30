@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, Pause, RefreshCw, ChevronLeft, ChevronRight, Eye, EyeOff, BookOpen, Search, Check, XCircle } from 'lucide-react';
+import { Mic, Pause, RefreshCw, ChevronLeft, ChevronRight, Eye, BookOpen, Search, Check, XCircle } from 'lucide-react';
 import { getAyatByPage, getSurahName, getAllSurahs, getPageByVerse } from '../services/quranApi'; 
 import Card from '../components/ui/Card'; 
 
@@ -37,7 +37,11 @@ const normalizeArabic = (text) => {
   // 6. STANDARISASI HURUF (UPDATE DISINI UNTUK 'ALA')
   res = res
     .replace(/(ة)/g, 'ه')       
-    .replace(/(ؤ)/g, 'و')       
+    .replace(/(ؤ)/g, 'و')   
+    // --- PERBAIKAN DI SINI ---
+    // Ubah 'ئ' (Hamza on Ya) jadi 'ا' (Alif) 
+    // Agar 'مستهزئون' (Google) sama dengan 'مستهزءون' (Quran) -> 'مستهزاون'
+    .replace(/(ئ)/g, 'ا')    
     .replace(/(ئ)/g, 'ي')
     // PERBAIKAN: Ubah 'ى' (Maqsura) jadi 'ا' (Alif)
     // Agar 'على' (User) jadi 'علا' -> Cocok dengan Quran 'علا'
@@ -93,6 +97,16 @@ const normalizeArabic = (text) => {
    
 };
 
+// --- HELPER: PEMBERSIH TERJEMAHAN (NEW) ---
+const cleanTranslation = (text) => {
+  if (!text) return "";
+  return text
+    .replace(/<sup[^>]*>.*?<\/sup>/g, '') // Hapus footnote angka (<sup>1</sup>)
+    .replace(/<[^>]+>/g, '')             // Hapus tag HTML lainnya
+    .replace(/[0-9]+/g, '')              // Hapus sisa angka jika ada
+    .trim();
+};
+
 // --- TOAST ---
 const BeautifulToast = ({ message, type }) => {
   if (!message) return null;
@@ -135,14 +149,15 @@ const MushafHafalan = () => {
   const ayatListRef = useRef([]); 
   const currentIndexRef = useRef(0);
   const activeAyatRef = useRef(null);
-  const lastProcessedTextRef = useRef(""); 
-  const pendingJumpRef = useRef(null); 
+  const isListeningRef = useRef(false); 
+  const pendingJumpRef = useRef(null);
 
   // Sync Refs
   useEffect(() => { ayatListRef.current = ayatList; }, [ayatList]);
   useEffect(() => { currentIndexRef.current = currentAyatIndex; }, [currentAyatIndex]);
+  useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
 
-  // --- 2. LOGIKA CEK REALTIME (PER KATA) ---
+  // --- 2. LOGIKA CEK REALTIME ---
   const handleCheckRecitation = useCallback((transcript) => {
     const currentList = ayatListRef.current;
     const idx = currentIndexRef.current;
@@ -152,28 +167,17 @@ const MushafHafalan = () => {
     const currentAyat = currentList[idx];
     if (!currentAyat || currentAyat.isCompleted) return;
 
-    // 1. Normalisasi input user (Pakai logika tulang)
     const userSkeleton = normalizeArabic(transcript);
     
-    // Optimasi: Jangan cek ulang kalau teks belum berubah
-    if (userSkeleton === lastProcessedTextRef.current) return;
-    lastProcessedTextRef.current = userSkeleton;
-
-    // 2. Cek setiap kata di ayat target
     let hasChanges = false;
     const newWords = currentAyat.words.map((word) => {
-      if (word.isRevealed) return word; // Lewati yang sudah benar
-
+      if (word.isRevealed) return word; 
       const targetSkeleton = normalizeArabic(word.text);
-      
-      // KUNCI: Cek apakah 'tulang' kata target ada di dalam 'tulang' ucapan user?
       const isMatch = userSkeleton.includes(targetSkeleton);
-      
       if (isMatch) hasChanges = true;
       return { ...word, isRevealed: isMatch };
     });
 
-    // 3. Update tampilan jika ada kata baru yang terbuka
     if (hasChanges) {
       setAyatList(prev => {
         const newList = [...prev];
@@ -182,7 +186,6 @@ const MushafHafalan = () => {
       });
     }
 
-    // 4. Cek Selesai Ayat
     const allRevealed = newWords.every(w => w.isRevealed);
     if (allRevealed) {
         handleAyatCompleted(idx);
@@ -190,6 +193,7 @@ const MushafHafalan = () => {
   }, []);
 
   const handleAyatCompleted = (idx) => {
+    // Bunyi Ting (Ayat Selesai)
     new Audio('https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3').play().catch(()=>{});
     
     setAyatList(prev => {
@@ -198,77 +202,131 @@ const MushafHafalan = () => {
       return newList;
     });
 
-    setSpokenText(""); // Kosongkan tampilan teks sementara
+    setSpokenText(""); 
     
     setTimeout(() => {
         if (idx < ayatListRef.current.length - 1) {
+            // --- KASUS: AYAT SELESAI, LANJUT KE AYAT BERIKUTNYA ---
             setCurrentAyatIndex(prev => prev + 1);
             
-            // --- RESET BUFFER MIC DISINI ---
-            // Abort akan mematikan mic dan menghapus buffer teks sebelumnya.
-            // onend akan menyalakan lagi otomatis karena isListening masih true.
+            // FITUR BARU 1: Notifikasi Ayat Benar
+            triggerNotif("MasyaAllah, Lanjut ayat berikutnya...", "success");
+
+            // Reset Buffer Mic (Flush)
             if (recognitionRef.current) {
-                try { 
-                    recognitionRef.current.abort(); 
-                } catch(e) {}
+                try { recognitionRef.current.abort(); } catch(e) {}
             }
-            // -------------------------------
 
         } else {
+            // --- KASUS: HALAMAN SELESAI ---
             stopMicrophone(); 
             triggerNotif("Alhamdulillah! Halaman Selesai.", "success");
             new Audio('https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3').play().catch(()=>{});
+
+            // FITUR BARU 2: Auto Next Page (Delay 2 detik)
+            setTimeout(() => {
+                if(currentPage < 604) {
+                    triggerNotif("Membuka halaman selanjutnya...", "info");
+                    setCurrentPage(prev => prev + 1);
+                }
+            }, 2000);
         }
     }, 500);
   };
 
-  // --- 3. SETUP WEB SPEECH API ---
-  useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true; 
-      recognition.lang = 'ar-SA'; 
-
-      recognition.onresult = (event) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          } else {
-            interimTranscript += event.results[i][0].transcript;
-          }
+  // --- 3. MIC CONTROLLER ---
+  const stopMicrophone = () => {
+    setIsListening(false);
+    if (recognitionRef.current) {
+        try {
+            recognitionRef.current.stop();
+        } catch (e) {
+            console.log("Mic stop error (ignored):", e);
         }
-        
-        const fullText = finalTranscript + interimTranscript;
-        setSpokenText(fullText);
-        handleCheckRecitation(fullText); // Cek langsung tanpa server
-      };
-
-      recognition.onerror = (event) => {
-        if (event.error === 'aborted') return; 
-        if (event.error === 'not-allowed') {
-          setIsListening(false);
-          triggerNotif("Izinkan mikrofon!", "error");
-        }
-      };
-
-      recognition.onend = () => {
-        // Fitur "Always On" (Nyala terus)
-        if (isListening) {
-          setTimeout(() => { try { recognition.start(); } catch (e) {} }, 300);
-        }
-      };
-
-      recognitionRef.current = recognition;
     }
-    
-    return () => { if (recognitionRef.current) recognitionRef.current.stop(); };
-  }, [isListening, handleCheckRecitation]); 
+  };
+
+  const startMicrophone = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return alert("Browser tidak support. Gunakan Chrome.");
+
+    if (recognitionRef.current) {
+        recognitionRef.current.onend = null; 
+        try { recognitionRef.current.abort(); } catch(e){}
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'ar-SA';
+
+    recognition.onstart = () => {
+        setIsListening(true);
+        setSpokenText("");
+    };
+
+    recognition.onresult = (event) => {
+        let final = '';
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) final += event.results[i][0].transcript;
+            else interim += event.results[i][0].transcript;
+        }
+        const fullText = final + interim;
+        if (fullText.trim()) {
+            setSpokenText(fullText);
+            handleCheckRecitation(fullText);
+        }
+    };
+
+    recognition.onerror = (event) => {
+        if (event.error !== 'no-speech') {
+             console.warn("Speech error:", event.error);
+        }
+        if (event.error === 'not-allowed') {
+            setIsListening(false);
+            triggerNotif("Izinkan mikrofon!", "error");
+        }
+    };
+
+    recognition.onend = () => {
+        if (isListeningRef.current) {
+            console.log("Mic reset/restart...");
+            setTimeout(() => {
+                try { recognition.start(); } 
+                catch (e) { 
+                    setIsListening(false); 
+                }
+            }, 250);
+        } else {
+            setIsListening(false);
+        }
+    };
+
+    try {
+        recognition.start();
+        recognitionRef.current = recognition;
+    } catch (e) {
+        console.error("Gagal start awal:", e);
+        setIsListening(false);
+    }
+  };
+
+  const toggleListening = () => {
+    if (isListening) {
+        stopMicrophone();
+    } else {
+        startMicrophone(); 
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+        isListeningRef.current = false;
+        if (recognitionRef.current) try { recognitionRef.current.abort(); } catch(e){}
+    };
+  }, []);
+
 
   // --- DATA & NAVIGASI ---
   useEffect(() => {
@@ -279,160 +337,73 @@ const MushafHafalan = () => {
   useEffect(() => { loadPageData(currentPage); }, [currentPage]);
 
   const loadPageData = async (page) => {
-    setIsLoading(true);
-    setIsListening(false);
-    if(recognitionRef.current) try { recognitionRef.current.stop(); } catch(e){}
-    
-    setSpokenText("");
-    setNotification(null);
+    try {
+        setIsLoading(true);
+        stopMicrophone(); 
+        setSpokenText("");
+        setNotification(null);
 
-    const data = await getAyatByPage(page);
-    if (data) {
-      const chapterId = data.meta.chapter_id;
-      const surahData = await getSurahName(chapterId);
-      setPageInfo({ surahName: surahData.name_simple, juz: data.meta.juz_number });
-      setSelectedSurahId(chapterId);
+        const data = await getAyatByPage(page);
+        if (data) {
+            const chapterId = data.meta.chapter_id;
+            const surahData = await getSurahName(chapterId);
+            setPageInfo({ surahName: surahData.name_simple, juz: data.meta.juz_number });
+            // setSelectedSurahId(chapterId);
 
-      let formattedAyats = data.verses.map((verse, index) => ({
-        id: index + 1, 
-        realVerseId: verse.verse_key,
-        verseNo: verse.verse_key.split(':')[1],
-        text: verse.text_uthmani,
-        translation: verse.translations[0]?.text || "Terjemahan...",
-        words: verse.text_uthmani.split(/\s+/).map((word, wIdx) => ({
-          id: wIdx, text: word, isRevealed: false 
-        })),
-        isCompleted: false
-      }));
+            let formattedAyats = data.verses.map((verse, index) => ({
+                id: index + 1, 
+                realVerseId: verse.verse_key,
+                 surahId: parseInt(verse.verse_key.split(':')[0]), // Ambil ID Surat
+                verseNo: verse.verse_key.split(':')[1],
+                text: verse.text_uthmani,
+                translation: cleanTranslation(verse.translations[0]?.text), // TERJEMAHAN BERSIH
+                words: verse.text_uthmani.split(/\s+/).map((word, wIdx) => ({
+                id: wIdx, text: word, isRevealed: false 
+                })),
+                isCompleted: false
+            }));
 
-      // Auto-Jump Logic
-      if (pendingJumpRef.current) {
-        const targetVerseNo = pendingJumpRef.current;
-        const targetIdx = formattedAyats.findIndex(v => v.verseNo == targetVerseNo);
-        if (targetIdx !== -1) {
-            setCurrentAyatIndex(targetIdx);
+            // --- LOGIKA BARU: START POSITIONING ---
+            let startIdx = 0;
+
+            if (pendingJumpRef.current) {
+                // Kasus 1: Jump ke Ayat tertentu (Fitur Search)
+                const targetVerseNo = pendingJumpRef.current;
+                const targetIdx = formattedAyats.findIndex(v => v.verseNo == targetVerseNo);
+                if (targetIdx !== -1) startIdx = targetIdx;
+                pendingJumpRef.current = null;
+            } else {
+                // Kasus 2: Ganti Surat (Dropdown)
+                // Cari ayat pertama yang milik 'selectedSurahId' di halaman ini
+                // Jika selectedSurahId ada di halaman ini, mulai dari situ.
+                // Jika tidak (misal halaman baru dari Auto Next), mulai dari 0.
+                const surahStartIndex = formattedAyats.findIndex(v => v.surahId === selectedSurahId);
+                if (surahStartIndex !== -1) {
+                    startIdx = surahStartIndex;
+                }
+            }
+
+            // Set Index Aktif
+            setCurrentAyatIndex(startIdx);
+
+            // Tandai ayat SEBELUM startIdx sebagai 'Selesai' (Auto-Open)
             formattedAyats = formattedAyats.map((ayat, idx) => {
-                if (idx < targetIdx) {
+                if (idx < startIdx) {
                     return { ...ayat, isCompleted: true, words: ayat.words.map(w => ({ ...w, isRevealed: true })) };
                 }
                 return ayat;
             });
+
+            setAyatList(formattedAyats);
         }
-        pendingJumpRef.current = null; 
-      } else {
-        setCurrentAyatIndex(0);
-      }
-
-      setAyatList(formattedAyats);
-    }
-    setIsLoading(false);
-  };
-
- // ... state lainnya ...
-const isListeningRef = useRef(false); // 1. Tambahkan Ref ini agar state selalu update di dalam event listener
-
-// Sync State ke Ref (Agar event listener baca data terbaru)
-useEffect(() => {
-  isListeningRef.current = isListening;
-}, [isListening]);
-
-// --- 5. SETUP WEB SPEECH API (VERSI ANTI-MACET) ---
-useEffect(() => {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  
-  if (!SpeechRecognition) {
-    triggerNotif("Browser tidak mendukung Speech API", "error");
-    return;
-  }
-
-  const recognition = new SpeechRecognition();
-  recognition.continuous = true; // Agar tidak mati tiap 1 kalimat
-  recognition.interimResults = true; // Agar teks muncul real-time
-  recognition.lang = 'ar-SA'; 
-
-  recognition.onstart = () => {
-    console.log("Mic Nyala");
-  };
-
-  recognition.onresult = (event) => {
-    let finalTranscript = '';
-    let interimTranscript = '';
-
-    for (let i = event.resultIndex; i < event.results.length; ++i) {
-      if (event.results[i].isFinal) {
-        finalTranscript += event.results[i][0].transcript;
-      } else {
-        interimTranscript += event.results[i][0].transcript;
-      }
-    }
-    
-    const fullText = finalTranscript + interimTranscript;
-    setSpokenText(fullText);
-    handleCheckRecitation(fullText);
-  };
-
-  recognition.onerror = (event) => {
-    console.warn("Speech Error:", event.error);
-    
-    // Abaikan error "no-speech" (hening) & "aborted" (stop manual)
-    if (event.error === 'no-speech' || event.error === 'network') {
-       // Jangan matikan isListening, biarkan onend yang merestart
-       return; 
-    }
-
-    if (event.error === 'not-allowed') {
-      setIsListening(false);
-      triggerNotif("Izinkan akses mikrofon!", "error");
+    } catch (error) {
+        console.error("Gagal memuat ayat:", error);
+        triggerNotif("Gagal memuat data.", "error");
+    } finally {
+        setIsLoading(false); 
     }
   };
 
-  recognition.onend = () => {
-    console.log("Mic Mati (OnEnd)");
-    
-    // LOGIKA RESTART AGRESIF
-    // Cek pakai Ref (bukan state biasa) untuk memastikan kita memang masih ingin mendengar
-    if (isListeningRef.current) {
-      console.log("Mencoba menyalakan kembali...");
-      // Delay sedikit biar browser tidak crash (Throttling)
-      setTimeout(() => {
-        try {
-          recognition.start();
-        } catch (e) {
-          console.error("Gagal restart mic:", e);
-        }
-      }, 300); // 300ms delay cukup aman
-    } else {
-      setIsListening(false); // Pastikan state UI mati jika memang disuruh berhenti
-    }
-  };
-
-  recognitionRef.current = recognition;
-
-  // Cleanup saat unmount
-  return () => {
-    if (recognitionRef.current) recognitionRef.current.abort();
-  };
-}, [handleCheckRecitation]); // Dependency dikurangi agar tidak sering re-mount
-
-// Update toggleListening agar sinkron dengan Ref
-const toggleListening = () => {
-  if (!recognitionRef.current) return alert("Gunakan Chrome/Edge.");
-  
-  if (isListening) {
-    // STOP MANUAL
-    setIsListening(false);
-    isListeningRef.current = false; // Update Ref segera
-    recognitionRef.current.stop();
-  } else {
-    // START MANUAL
-    setIsListening(true);
-    isListeningRef.current = true; // Update Ref segera
-    setSpokenText("");
-    try { recognitionRef.current.start(); } catch(e){}
-  }
-};
-
-  // Handlers Navigasi
   const handleSurahChange = (e) => {
     const newSurahId = parseInt(e.target.value);
     setSelectedSurahId(newSurahId);
