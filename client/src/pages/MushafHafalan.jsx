@@ -6,8 +6,50 @@ import Card from '../components/ui/Card';
 // --- 1. NORMALIZER CERDAS (Logika Server dipindah ke sini) ---
 const normalizeArabic = (text) => {
   if (!text) return "";
-  return text
-    // 1. Hapus Tatweel (ـ) & Tanda Mad (~)
+  let res = text
+    .replace(/[\u0640\u0653]/g, '') 
+    .replace(/[\u0610-\u061A\u064B-\u0652\u06D6-\u06ED]/g, '');
+
+  // 1. PENGECUALIAN KHUSUS (Zalika, Rahman, dll) - JANGAN UBAH
+  res = res
+    .replace(/ذ\u0670ل/g, 'ذل')   // Zalika
+    .replace(/ه\u0670ذ/g, 'هذ')   // Haza
+    .replace(/حم\u0670ن/g, 'حمن') // Rahman
+    .replace(/ل\u0670ه/g, 'له')   // Allah
+    .replace(/ل\u0670ك/g, 'لك')   // Lakin
+    .replace(/ل\u0670ئ/g, 'لئ');  // Ulaika
+
+  // 2. KHUSUS: Sholat, Zakat, dll (Waw dibuang) - JANGAN UBAH
+  res = res
+    .replace(/(صل|زك|حي|مشك|نج|غد|من)و\u0670(?=ة)/g, '$1ا')
+    .replace(/ربو\u0670/g, 'ربا');
+
+  // 3. UMUM: Waw + Dagger (Walid) -> Waw + Alif - JANGAN UBAH
+  res = res.replace(/و\u0670/g, 'وا');
+
+  // 4. KHUSUS: Ya + Dagger (Ataniya, Ala di Quran) -> Alif
+  // Contoh: 'عَلَىٰ' -> 'علا'
+  res = res.replace(/ى\u0670/g, 'ا');
+
+  // 5. UMUM: Sisa Dagger Alif (Kitab) -> Alif - JANGAN UBAH
+  res = res.replace(/\u0670/g, 'ا');
+
+  // 6. STANDARISASI HURUF (UPDATE DISINI UNTUK 'ALA')
+  res = res
+    .replace(/(ة)/g, 'ه')       
+    .replace(/(ؤ)/g, 'و')       
+    .replace(/(ئ)/g, 'ي')
+    // PERBAIKAN: Ubah 'ى' (Maqsura) jadi 'ا' (Alif)
+    // Agar 'على' (User) jadi 'علا' -> Cocok dengan Quran 'علا'
+    .replace(/(ى)/g, 'ا')       
+    
+    .replace(/[أإآٱء]/g, 'ا') // Hamza/Alif variasi -> Alif
+    .replace(/ا+/g, 'ا')      // Gabungkan Alif ganda
+    .replace(/[^ا-ي]/g, '')   // Hapus non-huruf
+   
+
+  res = res
+   // 1. Hapus Tatweel (ـ) & Tanda Mad (~)
     .replace(/[\u0640\u0653]/g, '') 
     // 2. Hapus Harakat, Waqaf, & Alif Kecil
     .replace(/[\u0610-\u061A\u064B-\u0652\u0670\u06D6-\u06ED]/g, '') 
@@ -18,9 +60,37 @@ const normalizeArabic = (text) => {
     .replace(/(ئ)/g, 'ي')       
     // 4. HAPUS SEMUA BENTUK ALIF (Solusi Pamungkas)
     .replace(/[أإآٱا]/g, '') 
+    // 3. KHUSUS: Gabungkan 'Alif Maqsura + Alif Kecil' (ىٰ) menjadi satu 'ا'
+    // Ini memperbaiki "Ataniya" agar tidak terdeteksi ganda
+    .replace(/ى\u0670/g, 'ا')
+
+    // 4. Ubah Alif Kecil (Dagger Alif) sisanya menjadi 'ا' (Fix untuk 'Kitab')
+    .replace(/\u0670/g, 'ا')
+
+    // 7. ANTI-DOUBLE: Gabungkan Alif ganda jadi satu (Solusi "Gak Panjang")
+    // Contoh: 'ااتاني' menjadi 'اتاني'
+    .replace(/ا+/g, 'ا')
+
+    // 7. ANTI-DOUBLE: Gabungkan Alif ganda jadi satu 
+    // Contoh: 'ااتاني' -> 'اتاني', 'الصلواة' -> 'الصلاة' (Jaga-jaga sisa Waw)
+    .replace(/ا+/g, 'ا')
+
+    
+
+       .replace(/[ء]/g, 'ا') 
     // 5. Hapus Spasi & Non-Huruf
     .replace(/[^ا-ي]/g, '')
+
+    
+    
+    // // Hapus Hamza Tunggal (ء) agar 'Ataniya' (ءاتاني) cocok dengan 'اتاني'
+    // .replace(/\u0621/g, 'ا')
     .trim();
+
+
+  return res;
+  
+   
 };
 
 // --- TOAST ---
@@ -86,8 +156,8 @@ const MushafHafalan = () => {
     const userSkeleton = normalizeArabic(transcript);
     
     // Optimasi: Jangan cek ulang kalau teks belum berubah
-    // if (userSkeleton === lastProcessedTextRef.current) return;
-    // lastProcessedTextRef.current = userSkeleton;
+    if (userSkeleton === lastProcessedTextRef.current) return;
+    lastProcessedTextRef.current = userSkeleton;
 
     // 2. Cek setiap kata di ayat target
     let hasChanges = false;
@@ -120,7 +190,6 @@ const MushafHafalan = () => {
   }, []);
 
   const handleAyatCompleted = (idx) => {
-    // Suara "Ting"
     new Audio('https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3').play().catch(()=>{});
     
     setAyatList(prev => {
@@ -129,21 +198,24 @@ const MushafHafalan = () => {
       return newList;
     });
 
-    setSpokenText(""); // Reset teks visual
-    lastProcessedTextRef.current = "";
+    setSpokenText(""); // Kosongkan tampilan teks sementara
     
-    // Pindah Ayat Otomatis (Cepat 0.5s)
     setTimeout(() => {
         if (idx < ayatListRef.current.length - 1) {
             setCurrentAyatIndex(prev => prev + 1);
-            // Restart Mic Softly untuk membersihkan buffer
-            if(recognitionRef.current) {
-                try { recognitionRef.current.stop(); } catch(e){}
-                // onend akan menyalakan lagi otomatis
+            
+            // --- RESET BUFFER MIC DISINI ---
+            // Abort akan mematikan mic dan menghapus buffer teks sebelumnya.
+            // onend akan menyalakan lagi otomatis karena isListening masih true.
+            if (recognitionRef.current) {
+                try { 
+                    recognitionRef.current.abort(); 
+                } catch(e) {}
             }
+            // -------------------------------
+
         } else {
-            setIsListening(false);
-            if(recognitionRef.current) recognitionRef.current.stop();
+            stopMicrophone(); 
             triggerNotif("Alhamdulillah! Halaman Selesai.", "success");
             new Audio('https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3').play().catch(()=>{});
         }
@@ -256,17 +328,109 @@ const MushafHafalan = () => {
     setIsLoading(false);
   };
 
-  const toggleListening = () => {
-    if (!recognitionRef.current) return alert("Gunakan Chrome/Edge.");
-    if (isListening) {
+ // ... state lainnya ...
+const isListeningRef = useRef(false); // 1. Tambahkan Ref ini agar state selalu update di dalam event listener
+
+// Sync State ke Ref (Agar event listener baca data terbaru)
+useEffect(() => {
+  isListeningRef.current = isListening;
+}, [isListening]);
+
+// --- 5. SETUP WEB SPEECH API (VERSI ANTI-MACET) ---
+useEffect(() => {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  
+  if (!SpeechRecognition) {
+    triggerNotif("Browser tidak mendukung Speech API", "error");
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true; // Agar tidak mati tiap 1 kalimat
+  recognition.interimResults = true; // Agar teks muncul real-time
+  recognition.lang = 'ar-SA'; 
+
+  recognition.onstart = () => {
+    console.log("Mic Nyala");
+  };
+
+  recognition.onresult = (event) => {
+    let finalTranscript = '';
+    let interimTranscript = '';
+
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        finalTranscript += event.results[i][0].transcript;
+      } else {
+        interimTranscript += event.results[i][0].transcript;
+      }
+    }
+    
+    const fullText = finalTranscript + interimTranscript;
+    setSpokenText(fullText);
+    handleCheckRecitation(fullText);
+  };
+
+  recognition.onerror = (event) => {
+    console.warn("Speech Error:", event.error);
+    
+    // Abaikan error "no-speech" (hening) & "aborted" (stop manual)
+    if (event.error === 'no-speech' || event.error === 'network') {
+       // Jangan matikan isListening, biarkan onend yang merestart
+       return; 
+    }
+
+    if (event.error === 'not-allowed') {
       setIsListening(false);
-      recognitionRef.current.stop();
-    } else {
-      setIsListening(true);
-      setSpokenText("");
-      try { recognitionRef.current.start(); } catch(e){}
+      triggerNotif("Izinkan akses mikrofon!", "error");
     }
   };
+
+  recognition.onend = () => {
+    console.log("Mic Mati (OnEnd)");
+    
+    // LOGIKA RESTART AGRESIF
+    // Cek pakai Ref (bukan state biasa) untuk memastikan kita memang masih ingin mendengar
+    if (isListeningRef.current) {
+      console.log("Mencoba menyalakan kembali...");
+      // Delay sedikit biar browser tidak crash (Throttling)
+      setTimeout(() => {
+        try {
+          recognition.start();
+        } catch (e) {
+          console.error("Gagal restart mic:", e);
+        }
+      }, 300); // 300ms delay cukup aman
+    } else {
+      setIsListening(false); // Pastikan state UI mati jika memang disuruh berhenti
+    }
+  };
+
+  recognitionRef.current = recognition;
+
+  // Cleanup saat unmount
+  return () => {
+    if (recognitionRef.current) recognitionRef.current.abort();
+  };
+}, [handleCheckRecitation]); // Dependency dikurangi agar tidak sering re-mount
+
+// Update toggleListening agar sinkron dengan Ref
+const toggleListening = () => {
+  if (!recognitionRef.current) return alert("Gunakan Chrome/Edge.");
+  
+  if (isListening) {
+    // STOP MANUAL
+    setIsListening(false);
+    isListeningRef.current = false; // Update Ref segera
+    recognitionRef.current.stop();
+  } else {
+    // START MANUAL
+    setIsListening(true);
+    isListeningRef.current = true; // Update Ref segera
+    setSpokenText("");
+    try { recognitionRef.current.start(); } catch(e){}
+  }
+};
 
   // Handlers Navigasi
   const handleSurahChange = (e) => {
