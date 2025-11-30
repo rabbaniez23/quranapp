@@ -256,17 +256,109 @@ const MushafHafalan = () => {
     setIsLoading(false);
   };
 
-  const toggleListening = () => {
-    if (!recognitionRef.current) return alert("Gunakan Chrome/Edge.");
-    if (isListening) {
+ // ... state lainnya ...
+const isListeningRef = useRef(false); // 1. Tambahkan Ref ini agar state selalu update di dalam event listener
+
+// Sync State ke Ref (Agar event listener baca data terbaru)
+useEffect(() => {
+  isListeningRef.current = isListening;
+}, [isListening]);
+
+// --- 5. SETUP WEB SPEECH API (VERSI ANTI-MACET) ---
+useEffect(() => {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  
+  if (!SpeechRecognition) {
+    triggerNotif("Browser tidak mendukung Speech API", "error");
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true; // Agar tidak mati tiap 1 kalimat
+  recognition.interimResults = true; // Agar teks muncul real-time
+  recognition.lang = 'ar-SA'; 
+
+  recognition.onstart = () => {
+    console.log("Mic Nyala");
+  };
+
+  recognition.onresult = (event) => {
+    let finalTranscript = '';
+    let interimTranscript = '';
+
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        finalTranscript += event.results[i][0].transcript;
+      } else {
+        interimTranscript += event.results[i][0].transcript;
+      }
+    }
+    
+    const fullText = finalTranscript + interimTranscript;
+    setSpokenText(fullText);
+    handleCheckRecitation(fullText);
+  };
+
+  recognition.onerror = (event) => {
+    console.warn("Speech Error:", event.error);
+    
+    // Abaikan error "no-speech" (hening) & "aborted" (stop manual)
+    if (event.error === 'no-speech' || event.error === 'network') {
+       // Jangan matikan isListening, biarkan onend yang merestart
+       return; 
+    }
+
+    if (event.error === 'not-allowed') {
       setIsListening(false);
-      recognitionRef.current.stop();
-    } else {
-      setIsListening(true);
-      setSpokenText("");
-      try { recognitionRef.current.start(); } catch(e){}
+      triggerNotif("Izinkan akses mikrofon!", "error");
     }
   };
+
+  recognition.onend = () => {
+    console.log("Mic Mati (OnEnd)");
+    
+    // LOGIKA RESTART AGRESIF
+    // Cek pakai Ref (bukan state biasa) untuk memastikan kita memang masih ingin mendengar
+    if (isListeningRef.current) {
+      console.log("Mencoba menyalakan kembali...");
+      // Delay sedikit biar browser tidak crash (Throttling)
+      setTimeout(() => {
+        try {
+          recognition.start();
+        } catch (e) {
+          console.error("Gagal restart mic:", e);
+        }
+      }, 300); // 300ms delay cukup aman
+    } else {
+      setIsListening(false); // Pastikan state UI mati jika memang disuruh berhenti
+    }
+  };
+
+  recognitionRef.current = recognition;
+
+  // Cleanup saat unmount
+  return () => {
+    if (recognitionRef.current) recognitionRef.current.abort();
+  };
+}, [handleCheckRecitation]); // Dependency dikurangi agar tidak sering re-mount
+
+// Update toggleListening agar sinkron dengan Ref
+const toggleListening = () => {
+  if (!recognitionRef.current) return alert("Gunakan Chrome/Edge.");
+  
+  if (isListening) {
+    // STOP MANUAL
+    setIsListening(false);
+    isListeningRef.current = false; // Update Ref segera
+    recognitionRef.current.stop();
+  } else {
+    // START MANUAL
+    setIsListening(true);
+    isListeningRef.current = true; // Update Ref segera
+    setSpokenText("");
+    try { recognitionRef.current.start(); } catch(e){}
+  }
+};
 
   // Handlers Navigasi
   const handleSurahChange = (e) => {
