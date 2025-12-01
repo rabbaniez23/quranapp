@@ -17,7 +17,7 @@ const Navbar = () => {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 text-emerald-400 font-bold text-2xl tracking-tighter hover:opacity-80 transition-opacity">
             <BookOpen className="w-8 h-8" />
-            <span>QuranAI</span>
+            <span>TemanTahfidz</span>
           </Link>
 
           {/* Menu Links (Desktop) */}
