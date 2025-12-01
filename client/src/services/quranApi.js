@@ -1,7 +1,7 @@
 const BASE_URL_QURAN_COM = "https://api.quran.com/api/v4";
 const BASE_URL_EQURAN = "https://equran.id/api/v2";
 
-// --- API DATA SURAT (EQURAN.ID) ---
+// --- API BARU (EQURAN.ID) - Untuk Quran Digital ---
 export const getAllSurahs = async () => {
   try {
     const response = await fetch(`${BASE_URL_EQURAN}/surat`);
@@ -22,9 +22,7 @@ export const getSurahDetail = async (nomorSurat) => {
   }
 };
 
-// --- API AUDIO (QURAN.COM) ---
-
-// Daftar Qari Manual (Agar pasti ada)
+// --- API AUDIO ---
 export const getReciters = async () => {
   return [
     { id: 7, reciter_name: "Mishari Rashid Al-Afasy", style: "Murattal" },
@@ -36,33 +34,40 @@ export const getReciters = async () => {
   ];
 };
 
-// 1. Audio Per Ayat (Untuk Play Manual/Search)
 export const getAudioBySurah = async (surahId, reciterId) => {
   try {
     const response = await fetch(`${BASE_URL_QURAN_COM}/recitations/${reciterId}/by_chapter/${surahId}`);
     const data = await response.json();
     return data.audio_files; 
-  } catch (error) {
-    return [];
-  }
+  } catch (error) { return []; }
 };
 
-// 2. FITUR BARU: Audio Full Surat (Satu File Panjang)
 export const getSurahAudioFull = async (surahId, reciterId) => {
   try {
     const response = await fetch(`${BASE_URL_QURAN_COM}/chapter_recitations/${reciterId}/${surahId}`);
     const data = await response.json();
-    return data.audio_file.audio_url; // Mengembalikan URL MP3 file panjang
+    return data.audio_file.audio_url; 
+  } catch (error) { return null; }
+};
+
+// --- API LAMA (MUSHAF HAFALAN) ---
+
+// 1. (BARU) Ambil Daftar Surat Format Lama (PENTING untuk MushafHafalan)
+export const getAllSurahsMushaf = async () => {
+  try {
+    const response = await fetch(`${BASE_URL_QURAN_COM}/chapters?language=id`);
+    const data = await response.json();
+    return data.chapters; 
   } catch (error) {
-    console.error("Gagal ambil audio full:", error);
-    return null;
+    console.error("Gagal ambil daftar surat mushaf");
+    return [];
   }
 };
 
-// --- API LAMA (JANGAN DIHAPUS - UTK MUSHAF HAFALAN) ---
+// 2. Ambil Ayat per Halaman
 export const getAyatByPage = async (pageNumber) => {
   try {
-    const response = await fetch(`${BASE_URL_QURAN_COM}/verses/by_page/${pageNumber}?language=id&words=false&translations=33&fields=text_uthmani,chapter_id,audio_url`);
+    const response = await fetch(`${BASE_URL_QURAN_COM}/verses/by_page/${pageNumber}?language=id&words=false&translations=33&fields=text_uthmani,chapter_id`);
     const data = await response.json();
     if (!data.verses || data.verses.length === 0) return null;
     return {

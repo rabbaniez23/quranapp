@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, Pause, RefreshCw, ChevronLeft, ChevronRight, Eye, BookOpen, Search, Check, XCircle } from 'lucide-react';
-import { getAyatByPage, getSurahName, getAllSurahs, getPageByVerse } from '../services/quranApi'; 
+import { getAyatByPage, getSurahName, getAllSurahsMushaf, getPageByVerse } from '../services/quranApi'; 
 import Card from '../components/ui/Card'; 
 
 // --- 1. NORMALIZER CERDAS (Logika Server dipindah ke sini) ---
@@ -330,7 +330,7 @@ const MushafHafalan = () => {
 
   // --- DATA & NAVIGASI ---
   useEffect(() => {
-    const fetchSurahs = async () => { setSurahList(await getAllSurahs()); };
+    const fetchSurahs = async () => { setSurahList(await getAllSurahsMushaf()); };
     fetchSurahs();
   }, []);
 
