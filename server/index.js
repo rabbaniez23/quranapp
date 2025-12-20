@@ -7,17 +7,25 @@ const path = require('path');
 const Groq = require("groq-sdk");
 
 const app = express();
-const port = 5000;
+const port = process.env.PORT || 5000; // Gunakan process.env.PORT jika ada
 
 app.use(cors());
 app.use(express.json());
 
 // API Key Groq
-const groq = new Groq({ apiKey: "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" }); // <-- GANTI DENGAN API KEY KAMU
+// Note: Sebaiknya nanti pindahkan key ini ke Environment Variables di Vercel Settings
+const groq = new Groq({ apiKey: "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" }); 
 
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-const upload = multer({ dest: 'uploads/' });
+// --- PERBAIKAN PATH UPLOAD UNTUK VERCEL ---
+// Vercel hanya mengizinkan tulis file di folder /tmp
+const isProduction = process.env.NODE_ENV === 'production';
+const uploadPath = isProduction ? '/tmp' : 'uploads/';
+
+const uploadDir = isProduction ? '/tmp' : path.join(__dirname, 'uploads');
+if (!isProduction && !fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+// Konfigurasi Multer
+const upload = multer({ dest: uploadPath });
 
 // --- 1. RUMUS KEMIRIPAN (LEVENSHTEIN) ---
 const calculateSimilarity = (s1, s2) => {
@@ -54,18 +62,13 @@ const calculateSimilarity = (s1, s2) => {
 const normalizeArabic = (text) => {
     if (!text) return "";
     let clean = text
-        // Hapus Tatweel, Mad, Harakat, Waqaf, Simbol
         .replace(/[\u0640\u0653\u0610-\u061A\u064B-\u0652\u0670\u06D6-\u06ED]/g, '') 
-        // Hapus SEMUA Alif (Biasa, Hamzah, Wasal)
         .replace(/[أإآٱا]/g, '') 
-        // Standarisasi Huruf Mirip
         .replace(/(ة)/g, 'ه')       
         .replace(/(ى)/g, 'ي')       
         .replace(/(ؤ)/g, 'و')       
         .replace(/(ئ)/g, 'ي')
-        // Hapus Alif Lam (ال) di awal kata (Opsional, membantu jika user baca sambung)
-        // .replace(/\sال/g, ' ') 
-        .replace(/[^ا-ي]/g, '') // Hapus non-arab
+        .replace(/[^ا-ي]/g, '') 
         .trim();
         
     return clean;
@@ -79,13 +82,15 @@ app.post('/api/cek-hafalan', upload.single('audio'), async (req, res) => {
         if (!req.file) return res.status(400).json({ error: 'No Audio' });
         
         const ayatTarget = req.body.ayatTarget || "";
-        // Kita ambil 100 karakter pertama ayat target sebagai "Contekan" (Prompt)
         const contextPrompt = ayatTarget.substring(0, 200); 
         
         console.log(`\n🎤 Target: ${contextPrompt}...`);
 
         audioPath = req.file.path;
         renamedPath = `${req.file.path}.webm`;
+        
+        // Rename sync mungkin error jika cross-device, kita gunakan copy & unlink jika perlu, 
+        // tapi untuk simple case renameSync biasanya oke di folder yang sama.
         fs.renameSync(audioPath, renamedPath);
 
         // --- KIRIM KE GROQ DENGAN DYNAMIC PROMPT ---
@@ -94,8 +99,6 @@ app.post('/api/cek-hafalan', upload.single('audio'), async (req, res) => {
             model: "whisper-large-v3",
             language: "ar", 
             response_format: "json",
-            // INI RAHASIANYA: Kita kasih bocoran ayatnya ke Groq
-            // Supaya dia "bias" mendengar ayat tersebut.
             prompt: contextPrompt 
         });
 
@@ -110,16 +113,13 @@ app.post('/api/cek-hafalan', upload.single('audio'), async (req, res) => {
         console.log(`   User   : [${userClean}]`);
         console.log(`   Target : [${targetClean}]`);
 
-        // 1. Cek Exact Match (Termasuk substring)
         let isCorrect = userClean.includes(targetClean);
         let similarity = 0;
 
-        // 2. Cek Fuzzy Match (Kemiripan)
         if (!isCorrect) {
             similarity = calculateSimilarity(userClean, targetClean);
             console.log(`📊 Skor: ${(similarity * 100).toFixed(2)}%`);
             
-            // Toleransi 75% sudah cukup aman
             if (similarity >= 0.75) {
                 isCorrect = true;
                 console.log("   (Lulus Fuzzy Match)");
@@ -128,6 +128,7 @@ app.post('/api/cek-hafalan', upload.single('audio'), async (req, res) => {
 
         console.log(`✅ Status: ${isCorrect ? "BENAR" : "SALAH"}`);
 
+        // Bersihkan file temporary
         if (fs.existsSync(renamedPath)) fs.unlinkSync(renamedPath);
 
         res.json({
@@ -139,12 +140,28 @@ app.post('/api/cek-hafalan', upload.single('audio'), async (req, res) => {
 
     } catch (error) {
         console.error("❌ Error:", error.message);
-        if (renamedPath && fs.existsSync(renamedPath)) fs.unlinkSync(renamedPath);
-        if (audioPath && fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+        // Cleanup jika error
+        try {
+            if (renamedPath && fs.existsSync(renamedPath)) fs.unlinkSync(renamedPath);
+            if (audioPath && fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+        } catch (e) { console.error("Error cleaning up files", e); }
+        
         res.status(500).json({ isCorrect: false, feedback: "Gagal memproses." });
     }
 });
 
-app.listen(port, () => {
-    console.log(`🚀 Server Groq (Dynamic Context) Siap di Port ${port}`);
+app.get('/', (req, res) => {
+    res.send('Server QuranApp is Running!');
 });
+
+// --- BAGIAN INI YANG DIUBAH AGAR BISA JALAN DI VERCEL & LOCAL ---
+
+if (process.env.NODE_ENV !== 'production') {
+    // Jalankan app.listen HANYA jika di local development
+    app.listen(port, () => {
+        console.log(`🚀 Server Groq (Dynamic Context) Siap di Port ${port}`);
+    });
+}
+
+// Export app agar Vercel bisa menjalankannya sebagai Serverless Function
+module.exports = app;
