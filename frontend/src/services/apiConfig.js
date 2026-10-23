@@ -1,5 +1,8 @@
 // Alamat backend (Python). Bisa diganti lewat file .env: VITE_TAJWID_API_URL=...
-export const BASE_URL = import.meta.env.VITE_TAJWID_API_URL || "http://localhost:8010";
+// Tanpa itu: saat development ke localhost:8010, setelah di-build ke alamat website ini sendiri
+// (backend yang menyajikan hasil build frontend).
+export const BASE_URL =
+  import.meta.env.VITE_TAJWID_API_URL || (import.meta.env.DEV ? "http://localhost:8010" : window.location.origin);
 
 export class ApiError extends Error {
   constructor(message, status) {

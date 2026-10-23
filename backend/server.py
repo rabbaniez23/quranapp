@@ -22,6 +22,8 @@ import numpy as np
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -55,6 +57,8 @@ MAX_SECONDS = 90
 # untuk dianalisis ulang kalau ada kata yang salah dinilai. Hanya di komputer ini.
 SAVE_RECORDINGS = os.getenv("SIMPAN_REKAMAN") == "1"
 RECORDINGS_DIR = os.path.join(os.path.dirname(__file__), "rekaman")
+# Hasil `npm run build` frontend; kalau ada, ikut disajikan dari sini (cukup satu alamat di server)
+FRONTEND_DIST = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
 
 checker: TajwidChecker | None = None
 gpu_lock = threading.Lock()  # satu GPU, jadi proses satu per satu
@@ -328,6 +332,21 @@ def save_recording(wave: np.ndarray, log: list[dict]):
     with open(os.path.join(RECORDINGS_DIR, f"{name}.json"), "w", encoding="utf-8") as f:
         json.dump(log, f, ensure_ascii=False, indent=1)
     print(f"💾 Rekaman disimpan: rekaman/{name}.wav ({len(wave) / SAMPLE_RATE:.0f} detik)")
+
+
+# --- FRONTEND (harus paling akhir, karena menangkap semua alamat lain) ---
+if os.path.isdir(FRONTEND_DIST):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def frontend(path: str):
+        if path.startswith("api/"):
+            raise HTTPException(404, "Tidak ditemukan")
+        file = os.path.realpath(os.path.join(FRONTEND_DIST, path))
+        if file.startswith(FRONTEND_DIST + os.sep) and os.path.isfile(file):
+            return FileResponse(file)
+        # Alamat halaman React (/login, /progres, ...) diarahkan ke index.html
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
 
 
 if __name__ == "__main__":
