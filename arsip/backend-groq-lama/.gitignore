@@ -1,0 +1,13 @@
+# Dependencies (install ulang pakai: npm install)
+node_modules
+
+# Kunci rahasia - JANGAN di-commit
+.env
+.env.*
+!.env.example
+
+# File audio upload sementara
+uploads/
+
+# Logs
+*.log

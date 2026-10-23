@@ -1,0 +1,19 @@
+# Lingkungan Python (install ulang pakai: pip install -r requirements.txt)
+.venv/
+__pycache__/
+*.pyc
+
+# Kunci rahasia - JANGAN di-commit
+.env
+.env.*
+!.env.example
+
+# Rekaman audio sementara
+*.wav
+*.webm
+
+# Rekaman sesi untuk analisis (SIMPAN_REKAMAN=1)
+rekaman/
+
+# Database akun & riwayat murojaah
+data/

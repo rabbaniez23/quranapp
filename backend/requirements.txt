@@ -1,0 +1,17 @@
+# Install PyTorch dulu sesuai hardware:
+#   GPU NVIDIA : pip install torch --index-url https://download.pytorch.org/whl/cu128
+#   CPU saja   : pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Lalu: pip install -r requirements.txt
+quran-muaalem==0.2.2
+transformers>=4.55,<5   # versi 5 belum didukung quran-muaalem
+librosa
+numba>=0.61.2
+soundfile
+sounddevice
+fastapi
+uvicorn[standard]
+# Database (MySQL lewat DATABASE_URL di .env; tanpa itu otomatis SQLite)
+sqlalchemy>=2.0
+pymysql
+cryptography   # dibutuhkan PyMySQL untuk login MySQL 8 (caching_sha2_password)
+python-dotenv
