@@ -94,6 +94,10 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 pembatas_login = akun.PembatasPercobaan()
+# Kirim kode verifikasi: maksimal 5 per email per jam, dan 100 per jam untuk seluruh website
+# (supaya website ini tidak bisa dipakai bot untuk membanjiri email orang)
+pembatas_kode_email = akun.PembatasPercobaan(batas=5, jendela=3600)
+pembatas_kode_semua = akun.PembatasPercobaan(batas=100, jendela=3600)
 
 
 # --- AKUN ---
@@ -114,18 +118,86 @@ def pengguna(authorization: str | None = Header(default=None)) -> dict:
 class DaftarBody(BaseModel):
     nama: str = Field(max_length=100)
     username: str = Field(max_length=40)
+    email: str = Field(max_length=254)
     password: str = Field(max_length=200)
+    website: str = Field(default="", max_length=200)  # jebakan bot: kolom tersembunyi, manusia tidak mengisinya
+
+
+class VerifikasiBody(BaseModel):
+    email: str = Field(max_length=254)
+    kode: str = Field(max_length=10)
+
+
+class EmailBody(BaseModel):
+    email: str = Field(max_length=254)
 
 
 class MasukBody(BaseModel):
-    username: str = Field(max_length=40)
+    username: str = Field(max_length=254)  # username atau email
     password: str = Field(max_length=200)
+
+
+class GoogleBody(BaseModel):
+    credential: str = Field(max_length=4096)
+
+
+def _boleh_kirim_kode(email: str):
+    email = email.strip().lower()
+    if pembatas_kode_email.diblokir(email) or pembatas_kode_semua.diblokir("semua"):
+        raise HTTPException(429, "Terlalu banyak permintaan kode. Coba lagi nanti.")
+    pembatas_kode_email.catat_gagal(email)
+    pembatas_kode_semua.catat_gagal("semua")
+
+
+@app.get("/api/auth/config")
+def auth_config():
+    """Pengaturan untuk halaman masuk/daftar (Client ID Google bukan rahasia)."""
+    return {"google_client_id": akun.GOOGLE_CLIENT_ID or None}
 
 
 @app.post("/api/auth/daftar")
 def daftar(body: DaftarBody):
+    """Langkah 1: data dicek, kode verifikasi dikirim ke email. Akun baru dibuat setelah kodenya benar."""
+    if body.website:  # bot: pura-pura berhasil, tapi tidak ada yang dikirim/dibuat
+        return {"email": body.email.strip().lower(), "perlu_verifikasi": True}
+    _boleh_kirim_kode(body.email)
     try:
-        user = akun.daftar(body.nama, body.username, body.password)
+        email = akun.mulai_daftar(body.nama, body.username, body.email, body.password)
+    except akun.AkunError as e:
+        raise HTTPException(400, str(e)) from e
+    except OSError as e:  # SMTP gagal
+        print(f"⚠️  Gagal kirim email: {e!r}")
+        raise HTTPException(503, "Email verifikasi gagal dikirim. Coba lagi sebentar.") from e
+    return {"email": email, "perlu_verifikasi": True}
+
+
+@app.post("/api/auth/daftar/kirim-ulang")
+def kirim_ulang(body: EmailBody):
+    _boleh_kirim_kode(body.email)
+    try:
+        akun.kirim_ulang_kode(body.email)
+    except akun.AkunError as e:
+        raise HTTPException(400, str(e)) from e
+    except OSError as e:
+        print(f"⚠️  Gagal kirim email: {e!r}")
+        raise HTTPException(503, "Email verifikasi gagal dikirim. Coba lagi sebentar.") from e
+    return {"ok": True}
+
+
+@app.post("/api/auth/daftar/verifikasi")
+def verifikasi(body: VerifikasiBody):
+    """Langkah 2: kode dari email benar → akun dibuat dan langsung masuk."""
+    try:
+        user = akun.verifikasi_daftar(body.email, body.kode)
+    except akun.AkunError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"token": akun.buat_sesi(user["id"]), "user": user}
+
+
+@app.post("/api/auth/google")
+def masuk_google(body: GoogleBody):
+    try:
+        user = akun.masuk_google(body.credential)
     except akun.AkunError as e:
         raise HTTPException(400, str(e)) from e
     return {"token": akun.buat_sesi(user["id"]), "user": user}
@@ -139,7 +211,7 @@ def masuk(body: MasukBody):
     user = akun.masuk(body.username, body.password)
     if user is None:
         pembatas_login.catat_gagal(kunci)
-        raise HTTPException(401, "Username atau kata sandi salah.")
+        raise HTTPException(401, "Username/email atau kata sandi salah.")
     pembatas_login.reset(kunci)
     return {"token": akun.buat_sesi(user["id"]), "user": user}
 

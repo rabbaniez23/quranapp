@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, MetaData, SmallInteger, String, Table,
-    create_engine, func, insert, select,
+    create_engine, func, insert, inspect, select, text,
 )
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -32,8 +32,27 @@ users = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("nama", String(60), nullable=False),
     Column("username", String(20), nullable=False, unique=True),
-    Column("password_hash", String(255), nullable=False),
+    Column("password_hash", String(255), nullable=False),   # "!" = tanpa kata sandi (daftar lewat Google)
     Column("dibuat", DateTime, nullable=False),
+    Column("email", String(254)),                             # sudah terverifikasi (kode email / Google)
+    Column("google_sub", String(64)),                         # ID akun Google, kalau pernah masuk lewat Google
+    Index("users_email", "email", unique=True),
+    Index("users_google_sub", "google_sub", unique=True),
+)
+
+# Pendaftaran yang menunggu kode verifikasi email; jadi baris users setelah kodenya benar
+pendaftaran = Table(
+    "pendaftaran", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("email", String(254), nullable=False, index=True),
+    Column("username", String(20), nullable=False),
+    Column("nama", String(60), nullable=False),
+    Column("password_hash", String(255), nullable=False),
+    Column("kode_hash", String(64), nullable=False),
+    Column("kedaluwarsa", DateTime, nullable=False),
+    Column("percobaan", SmallInteger, nullable=False, default=0),   # kode salah dimasukkan
+    Column("jumlah_kirim", SmallInteger, nullable=False, default=1),
+    Column("dikirim", DateTime, nullable=False),                     # kode terakhir dikirim
 )
 
 sessions = Table(
@@ -114,6 +133,7 @@ def init_db(eng=None):
     """Buat tabel yang belum ada, lalu isi dim_ayat (sekali saja)."""
     eng = eng or engine
     metadata.create_all(eng)
+    _tambah_kolom_baru(eng)
     with eng.begin() as conn:
         if conn.execute(select(func.count()).select_from(dim_ayat)).scalar():
             return
@@ -123,6 +143,19 @@ def init_db(eng=None):
         conn.execute(insert(dim_ayat), [
             {"surat": s, "ayat": a, "halaman": h, "juz": j, "jumlah_kata": k} for s, a, h, j, k in rows
         ])
+
+
+def _tambah_kolom_baru(eng):
+    """Database lama (sebelum ada email & Google): tambahkan kolom + indeksnya. create_all tidak mengubah tabel yang sudah ada."""
+    insp = inspect(eng)
+    kolom = {c["name"] for c in insp.get_columns("users")}
+    indeks = {i["name"] for i in insp.get_indexes("users")}
+    with eng.begin() as conn:
+        for nama, tipe in (("email", "VARCHAR(254)"), ("google_sub", "VARCHAR(64)")):
+            if nama not in kolom:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {nama} {tipe} NULL"))
+            if f"users_{nama}" not in indeks:
+                conn.execute(text(f"CREATE UNIQUE INDEX users_{nama} ON users ({nama})"))
 
 
 def utc_now() -> datetime:

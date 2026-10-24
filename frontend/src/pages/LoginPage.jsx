@@ -3,10 +3,11 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { BookOpen, User, Lock, AlertCircle } from 'lucide-react';
 import Button from '../components/ui/Button';
 import AuthField from '../components/AuthField';
+import GoogleButton from '../components/GoogleButton';
 import { useAuth } from '../context/AuthContext';
 
 const LoginPage = () => {
-  const { user, login, serverError } = useAuth();
+  const { user, login, loginGoogle, serverError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState('');
@@ -23,7 +24,7 @@ const LoginPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!username.trim() || !password) return setError('Isi username dan kata sandi.');
+    if (!username.trim() || !password) return setError('Isi username/email dan kata sandi.');
     setLoading(true);
     setError(null);
     try {
@@ -33,6 +34,16 @@ const LoginPage = () => {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGoogle = async (credential) => {
+    setError(null);
+    try {
+      await loginGoogle(credential);
+      navigate(tujuan, { replace: true });
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -51,9 +62,11 @@ const LoginPage = () => {
           </div>
         )}
 
+        <GoogleButton onCredential={handleGoogle} text="signin_with" />
+
         <form onSubmit={handleSubmit} className="space-y-5" noValidate>
           <AuthField
-            label="Username" icon={User} value={username} onChange={setUsername}
+            label="Username atau email" icon={User} value={username} onChange={setUsername}
             placeholder="mis. naufal" autoComplete="username" autoFocus
           />
           <AuthField

@@ -50,8 +50,17 @@ export const AuthProvider = ({ children }) => {
     (username, password) => authApi.masuk(username, password).then(terima),
     [terima]
   );
+  // Daftar 2 langkah: register() mengirim kode ke email, verifyRegister() membuat akun dan langsung masuk
   const register = useCallback(
-    (nama, username, password) => authApi.daftar(nama, username, password).then(terima),
+    (nama, username, email, password, website) => authApi.daftar(nama, username, email, password, website),
+    []
+  );
+  const verifyRegister = useCallback(
+    (email, kode) => authApi.verifikasiDaftar(email, kode).then(terima),
+    [terima]
+  );
+  const loginGoogle = useCallback(
+    (credential) => authApi.masukGoogle(credential).then(terima),
     [terima]
   );
   const logout = useCallback(async () => {
@@ -62,8 +71,8 @@ export const AuthProvider = ({ children }) => {
   }, [token]);
 
   const value = useMemo(
-    () => ({ user, token, checking, serverError, login, register, logout }),
-    [user, token, checking, serverError, login, register, logout]
+    () => ({ user, token, checking, serverError, login, register, verifyRegister, loginGoogle, logout }),
+    [user, token, checking, serverError, login, register, verifyRegister, loginGoogle, logout]
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
