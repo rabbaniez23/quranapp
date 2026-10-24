@@ -1,0 +1,15 @@
+# Backend + website TemanTahfidz di hp-server (systemd --user). Model AI ada di laptop lain (AI_SERVER di .env).
+# Pasang: cp deploy/quranapp.service ~/.config/systemd/user/ && systemctl --user enable --now quranapp
+[Unit]
+Description=TemanTahfidz - backend + website
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/apps/quranapp/backend
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/apps/quranapp/backend/.venv/bin/python server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
