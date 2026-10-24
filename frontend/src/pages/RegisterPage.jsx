@@ -182,6 +182,9 @@ const RegisterPage = () => {
                   value={website} onChange={(e) => setWebsite(e.target.value)} /></label>
               </div>
               <Button type="submit" loading={loading} className="w-full py-3.5 mt-2">Daftar Akun</Button>
+              <p className="text-center text-xs text-slate-500">
+                Dengan mendaftar, kamu menyetujui <Link to="/privasi" className="text-slate-300 hover:text-emerald-400 underline underline-offset-2">Kebijakan Privasi</Link> kami.
+              </p>
             </form>
 
             <p className="text-center text-slate-400 text-sm mt-8">

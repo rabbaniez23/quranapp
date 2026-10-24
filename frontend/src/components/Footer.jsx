@@ -45,7 +45,10 @@ const Footer = () => {
 
         {/* Copyright */}
         <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row items-center justify-between text-slate-500 text-sm">
-          <p>&copy; {new Date().getFullYear()} TemanTahfidz. All rights reserved.</p>
+          <p>
+            &copy; {new Date().getFullYear()} TemanTahfidz. All rights reserved. ·{' '}
+            <Link to="/privasi" className="hover:text-emerald-400 transition-colors">Kebijakan Privasi</Link>
+          </p>
           <p className="flex items-center gap-1 mt-2 md:mt-0">
             Dibuat dengan <Heart className="w-4 h-4 text-red-500 fill-current" /> oleh Developer
           </p>
