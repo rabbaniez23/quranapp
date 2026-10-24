@@ -180,6 +180,8 @@ MAX_LEADING_JUNK = 10
 # (وَٱلَّذِينَ dibaca ٱلَّذِينَ). ب / ل / ك tidak dimasukkan karena sering huruf asli kata
 # (ٱلْبَصَرَ, لَوْ, كَفَرُوا) atau "al-".
 PARTICLES = "وف"
+# Banyak huruf yang benar-benar berbeda dalam satu kata sampai dianggap "dibaca lain" (wajib diulang)
+MAX_HURUF_MELESET = 2
 # Harakat & tanda Utsmani (untuk melihat huruf terakhir kata Utsmani)
 DIACRITICS = re.compile(r"[ؐ-ًؚ-ٰٟۖ-ۭ࣓-ࣿ]")
 _SAME = {
@@ -258,9 +260,9 @@ def check_words_lenient(words: list[str], predicted: str, count_upto: int | None
     """Bandingkan fonem terdengar dengan kata-kata ini (mode mudah, untuk menghafal).
 
     Hasil: Kesalahan dengan jenis
-      "berat"  : kata terlewat / dibaca lain (lebih dari separuh hurufnya beda), atau huruf sambung
-                 (وَ / فَ) hilang/bertambah di tengah bacaan → harus diulang
-      "ringan" : sedikit beda (harakat tertukar, 1-2 huruf terdengar lain) → kata tetap terbuka,
+      "berat"  : kata terlewat / dibaca lain (2+ huruf beda, atau lebih dari separuh hurufnya), atau
+                 huruf sambung (وَ / فَ) hilang/bertambah di tengah bacaan → harus diulang
+      "ringan" : sedikit beda (harakat tertukar, 1 huruf terdengar lain) → kata tetap terbuka,
                  cukup dicatat
     segment_start: kata pertama adalah awal potongan audio (sesudah berhenti). Huruf pertamanya
                  sering tidak tertangkap model, jadi tidak dinilai.
@@ -276,6 +278,7 @@ def check_words_lenient(words: list[str], predicted: str, count_upto: int | None
         pred = _strip_leading_junk(ref_s, pred)
     catatan: dict[int, list[str]] = {}
     huruf_meleset: dict[int, int] = {}  # banyak huruf konsonan yang meleset per kata
+    huruf_diganti: dict[int, int] = {}  # yang meleset karena diganti/hilang (bukan bunyi tambahan)
     huruf_sambung: set[int] = set()     # وَ / فَ hilang/bertambah
 
     first_consonant, last_consonant = {}, {}
@@ -288,11 +291,13 @@ def check_words_lenient(words: list[str], predicted: str, count_upto: int | None
     # Kata berakhiran ta marbuthah (ة): saat berhenti boleh dibaca -h, -tu, -tun, atau -tuh
     ta_marbutah = {idx for idx, w in enumerate(words) if DIACRITICS.sub("", w).endswith("ة")}
 
-    def add(idx: int, pesan: str, consonant: bool = False, particle: bool = False):
+    def add(idx: int, pesan: str, consonant: bool = False, particle: bool = False, diganti: bool = False):
         if idx >= limit:
             return
         if consonant:
             huruf_meleset[idx] = huruf_meleset.get(idx, 0) + 1
+        if diganti:
+            huruf_diganti[idx] = huruf_diganti.get(idx, 0) + 1
         if particle:
             huruf_sambung.add(idx)
         if pesan not in catatan.setdefault(idx, []):
@@ -363,9 +368,9 @@ def check_words_lenient(words: list[str], predicted: str, count_upto: int | None
                 continue
             particle = i in word_start and expected_ch in PARTICLES
             if got_ch and got_ch not in VOWELS:
-                add(idx, f"Huruf '{original}' terdengar seperti '{got_ch}'", consonant=True, particle=particle)
+                add(idx, f"Huruf '{original}' terdengar seperti '{got_ch}'", consonant=True, particle=particle, diganti=True)
             else:
-                add(idx, f"Huruf '{original}' tidak terdengar", consonant=True, particle=particle)
+                add(idx, f"Huruf '{original}' tidak terdengar", consonant=True, particle=particle, diganti=True)
 
     hasil = []
     for idx, pesan in sorted(catatan.items()):
@@ -376,8 +381,12 @@ def check_words_lenient(words: list[str], predicted: str, count_upto: int | None
         # karena sering menyatu dengan huruf yang sama di kata sebelahnya saat dibaca cepat.
         onset_only = segment_start and idx == 0 and n_consonant <= 1
         terlewat = n_consonant >= 2 and terdengar.get(idx, 0) == 0 and not onset_only
-        # Berat: terlewat, huruf sambung salah, atau lebih dari separuh huruf kata ini berbeda
-        berat = terlewat or idx in huruf_sambung or (n_consonant > 0 and meleset / n_consonant > 0.5)
+        # Berat: terlewat, huruf sambung salah, atau dibaca lain: 2 huruf atau lebih diganti/hilang
+        # (makhraj mirip sudah disamakan), atau lebih dari separuh huruf kata ini berbeda.
+        # Satu huruf saja cukup dicatat, karena model kadang salah dengar satu huruf. Bunyi tambahan
+        # tidak dihitung di aturan 2 huruf: sering itu awal kata berikutnya yang ikut terdengar.
+        berat = (terlewat or idx in huruf_sambung or huruf_diganti.get(idx, 0) >= MAX_HURUF_MELESET
+                 or (n_consonant > 0 and meleset / n_consonant > 0.5))
         hasil += [Kesalahan(idx, words[idx], "berat" if berat else "ringan", p) for p in pesan]
     # Kata terlewat yang semua hurufnya masuk kelonggaran (jadi tidak punya catatan sama sekali)
     for idx in range(min(limit, len(words))):
