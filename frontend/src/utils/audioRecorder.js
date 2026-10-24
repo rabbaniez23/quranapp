@@ -5,12 +5,30 @@
 const SAMPLE_RATE = 16000;
 const CHUNK_SAMPLES = SAMPLE_RATE / 4; // 0,25 detik
 
-// AudioWorklet: meneruskan potongan suara mentah dari mic ke halaman
+// AudioWorklet: kumpulkan suara mentah dari mic jadi potongan 0,25 detik, baru dikirim ke halaman.
+// (Mengirim tiap 128 sampel = ±125 pesan per detik ke halaman, terasa berat di HP.)
 const WORKLET_CODE = `
 class CaptureProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.buf = new Float32Array(${CHUNK_SAMPLES});
+    this.n = 0;
+  }
   process(inputs) {
     const channel = inputs[0] && inputs[0][0];
-    if (channel) this.port.postMessage(channel.slice(0));
+    if (!channel) return true;
+    let i = 0;
+    while (i < channel.length) {
+      const take = Math.min(channel.length - i, this.buf.length - this.n);
+      this.buf.set(channel.subarray(i, i + take), this.n);
+      this.n += take;
+      i += take;
+      if (this.n === this.buf.length) {
+        this.port.postMessage(this.buf, [this.buf.buffer]);
+        this.buf = new Float32Array(${CHUNK_SAMPLES});
+        this.n = 0;
+      }
+    }
     return true;
   }
 }

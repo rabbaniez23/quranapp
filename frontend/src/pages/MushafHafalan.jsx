@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Mic, Pause, RefreshCw, RotateCcw, ChevronLeft, ChevronRight, Eye, BookOpen, Search, Check, XCircle, Sparkles } from 'lucide-react';
+import { Mic, Pause, RefreshCw, RotateCcw, ChevronLeft, ChevronRight, Eye, BookOpen, Search, Check, XCircle, Sparkles, Info } from 'lucide-react';
 import { getAyatByPage, getSurahName, getAllSurahsMushaf, getPageByVerse } from '../services/quranApi';
 import { checkAiHealth, connectHafalan } from '../services/tajwidApi';
 import { simpanMurojaah } from '../services/murojaahApi';
@@ -22,7 +22,10 @@ const cleanTranslation = (text) => {
 // Status yang dihitung sebagai kesalahan saat murojaah
 const MISTAKES = ['wrong', 'skipped', 'corrected'];
 
-const HIDDEN_STYLE = 'text-slate-500 opacity-40 blur-[4px]';
+// Kata tersembunyi. HP: balok abu-abu (teks transparan), karena efek blur di tiap kata sangat berat
+// untuk GPU HP. Laptop (lg): tetap buram seperti biasa.
+const HIDDEN_BASE = 'select-none text-transparent lg:text-slate-500 lg:opacity-40 lg:blur-[4px]';
+const HIDDEN_STYLE = `${HIDDEN_BASE} bg-slate-700/60 lg:bg-transparent`;
 
 // Tampilan kata sesuai statusnya. Kata yang salah TETAP tersembunyi (hanya ditandai posisinya),
 // baru terbuka setelah dibaca benar.
@@ -30,8 +33,8 @@ const WORD_STYLE = {
   given: 'text-white',
   correct: 'text-white',
   corrected: 'text-amber-300',
-  wrong: `${HIDDEN_STYLE} bg-red-500/25 ring-2 ring-red-500/70`,
-  skipped: `${HIDDEN_STYLE} bg-red-500/25 ring-2 ring-red-500/70`,
+  wrong: `${HIDDEN_BASE} bg-red-500/25 ring-2 ring-red-500/70`,
+  skipped: `${HIDDEN_BASE} bg-red-500/25 ring-2 ring-red-500/70`,
 };
 
 // Kata yang terbuka tapi ada catatan kecil (tidak wajib diulang)
@@ -132,6 +135,7 @@ const MushafHafalan = () => {
   const [isPeeking, setIsPeeking] = useState(false);
   const [notification, setNotification] = useState(null);
   const [showAiNotice, setShowAiNotice] = useState(false);
+  const [panelHp, setPanelHp] = useState(null); // HP: panel 'cari' / 'warna' yang sedang dibuka
 
   // Refs (dipakai di dalam event mikrofon supaya selalu dapat data terbaru)
   const recognitionRef = useRef(null);
@@ -469,6 +473,29 @@ const MushafHafalan = () => {
     startMicrophone();
   };
 
+  // HP: layar jangan mati sendiri selama murojaah (dilepas lagi saat berhenti)
+  useEffect(() => {
+    if (!isListening || !('wakeLock' in navigator)) return;
+    let kunci = null;
+    let aktif = true;
+    const minta = async () => {
+      try {
+        const baru = await navigator.wakeLock.request('screen');
+        if (aktif) kunci = baru;
+        else baru.release();
+      } catch { /* ditolak (mis. baterai hemat): layar mengikuti pengaturan HP */ }
+    };
+    // Kunci otomatis lepas kalau tab ditinggal; minta lagi saat kembali
+    const saatKembali = () => { if (document.visibilityState === 'visible') minta(); };
+    minta();
+    document.addEventListener('visibilitychange', saatKembali);
+    return () => {
+      aktif = false;
+      document.removeEventListener('visibilitychange', saatKembali);
+      kunci?.release().catch(() => {});
+    };
+  }, [isListening]);
+
   // Cek apakah server AI menyala (diulang tiap 15 detik, supaya bisa dinyalakan belakangan)
   useEffect(() => {
     let alive = true;
@@ -638,8 +665,41 @@ const MushafHafalan = () => {
       <BeautifulToast message={notification?.msg} type={notification?.type} />
       {showAiNotice && <AiNotice recording={aiRecording} onAccept={acceptAiNotice} onCancel={() => setShowAiNotice(false)} />}
 
-      {/* HEADER */}
-      <div className="w-full max-w-4xl mb-6 bg-slate-800/50 p-4 rounded-2xl border border-white/5 backdrop-blur-md shadow-lg">
+      {/* HEADER HP: 2 baris ringkas. Cari ayat & keterangan warna dibuka lewat tombol */}
+      <div className="lg:hidden w-full mb-4 bg-slate-800/60 p-3 rounded-2xl border border-white/5 space-y-2">
+        <div className="flex items-center gap-2">
+          <button onClick={handlePrevPage} disabled={currentPage===1} aria-label="Halaman sebelumnya" className="w-11 h-11 shrink-0 flex items-center justify-center bg-slate-700 rounded-xl text-white disabled:opacity-40"><ChevronLeft size={20}/></button>
+          <select value={selectedSurahId} onChange={handleSurahChange} aria-label="Pilih surat" className="flex-1 min-w-0 h-11 bg-slate-900 border border-slate-700 text-white text-sm rounded-xl px-3">
+            {surahList.length === 0 && <option>Memuat...</option>}
+            {surahList.map(s => <option key={s.id} value={s.id}>{s.id}. {s.name_simple}</option>)}
+          </select>
+          <button onClick={handleNextPage} disabled={currentPage===604} aria-label="Halaman berikutnya" className="w-11 h-11 shrink-0 flex items-center justify-center bg-slate-700 rounded-xl text-white disabled:opacity-40"><ChevronRight size={20}/></button>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-400 truncate">{pageInfo.surahName} · Juz {pageInfo.juz} · Hlm {currentPage}</span>
+          <div className="flex gap-1 shrink-0">
+            <button onClick={() => setPanelHp(p => p === 'cari' ? null : 'cari')} aria-label="Cari ayat" aria-expanded={panelHp === 'cari'} className={`w-10 h-10 flex items-center justify-center rounded-xl ${panelHp === 'cari' ? 'bg-emerald-600 text-white' : 'bg-slate-700/70 text-slate-300'}`}><Search size={18}/></button>
+            <button onClick={() => setPanelHp(p => p === 'warna' ? null : 'warna')} aria-label="Keterangan warna" aria-expanded={panelHp === 'warna'} className={`w-10 h-10 flex items-center justify-center rounded-xl ${panelHp === 'warna' ? 'bg-emerald-600 text-white' : 'bg-slate-700/70 text-slate-300'}`}><Info size={18}/></button>
+          </div>
+        </div>
+        {panelHp === 'cari' && (
+          <form onSubmit={(e) => { handleJumpToAyat(e); setPanelHp(null); }} className="flex gap-2 pt-1">
+            <input type="number" inputMode="numeric" placeholder="Nomor ayat" aria-label="Nomor ayat" value={targetAyatNum} onChange={(e) => setTargetAyatNum(e.target.value)} className="flex-1 min-w-0 h-11 bg-slate-900 border border-slate-700 text-white rounded-xl px-3" autoFocus />
+            <button type="submit" className="h-11 px-4 bg-emerald-600 text-white rounded-xl font-semibold text-sm">Cari</button>
+          </form>
+        )}
+        {panelHp === 'warna' && (
+          <div className="grid gap-2 pt-1 text-xs text-slate-300">
+            <span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-white"></span> Benar</span>
+            <span className="flex items-center gap-2"><span className="w-4 border-b-2 border-dotted border-amber-300"></span> Ada catatan kecil (tidak wajib diulang)</span>
+            <span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-amber-300"></span> Sempat salah, lalu dibenarkan</span>
+            <span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded ring-2 ring-red-500/70 bg-red-500/25"></span> Terlewat / dibaca lain, ulangi dari sini</span>
+          </div>
+        )}
+      </div>
+
+      {/* HEADER LAPTOP */}
+      <div className="hidden lg:block w-full max-w-4xl mb-6 bg-slate-800/50 p-4 rounded-2xl border border-white/5 backdrop-blur-md shadow-lg">
         <div className="flex flex-col lg:flex-row gap-4 justify-between items-center">
           <div className="flex items-center gap-3 w-full lg:w-auto flex-1">
              <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400"><BookOpen size={20} /></div>
@@ -674,7 +734,7 @@ const MushafHafalan = () => {
       <div className={`w-full max-w-3xl mb-4 text-center transition-all duration-300 ${isListening ? 'opacity-100 h-auto' : 'opacity-0 h-0 overflow-hidden'}`}>
          <div className="inline-block bg-slate-800/80 px-6 py-2 rounded-full border border-emerald-500/30 shadow-lg">
             <p className="text-slate-400 text-[10px] uppercase tracking-widest font-bold flex items-center justify-center gap-2">
-              <span className="w-2 h-2 bg-red-500 rounded-full animate-ping"></span> Mendengarkan
+              <span className="w-2 h-2 bg-red-500 rounded-full lg:animate-ping"></span> Mendengarkan
             </p>
             {usingAi && aiRecording && <p className="text-amber-300/80 text-[10px] mt-0.5">Rekaman disimpan untuk perbaikan aplikasi</p>}
          </div>
@@ -692,17 +752,17 @@ const MushafHafalan = () => {
            const correctedWords = ayatPositions.filter(pos => wordStatus[pos] === 'corrected');
            const minorWords = ayatPositions.filter(pos => wordStatus[pos] === 'correct' && minorByPos[pos]);
            return (
-             <div key={ayat.realVerseId} ref={isActive ? activeAyatRef : null} className={`transition-all duration-500 ${isActive ? 'scale-100 opacity-100' : 'scale-95 opacity-60'}`}>
-               <Card className={`p-6 border-2 transition-colors duration-300 relative overflow-hidden ${isActive ? isListening ? 'border-emerald-500 bg-slate-800/80 shadow-[0_0_30px_rgba(16,185,129,0.1)]' : 'border-slate-500 bg-slate-800' : 'border-transparent bg-slate-900'}`} hoverEffect={false}>
-                 <div className="flex justify-between items-start mb-6 border-b border-white/5 pb-4">
+             <div key={ayat.realVerseId} ref={isActive ? activeAyatRef : null} className={`cv-auto lg:transition-all lg:duration-500 ${isActive ? 'opacity-100' : 'opacity-60 lg:scale-95'}`}>
+               <Card className={`!p-4 sm:!p-6 border-2 relative overflow-hidden ${isActive ? isListening ? 'border-emerald-500 bg-slate-800/80 lg:shadow-[0_0_30px_rgba(16,185,129,0.1)]' : 'border-slate-500 bg-slate-800' : 'border-transparent bg-slate-900'}`} hoverEffect={false}>
+                 <div className="flex justify-between items-start mb-4 sm:mb-6 border-b border-white/5 pb-3 sm:pb-4">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${isActive || isDone ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-400'}`}>{ayat.verseNo}</div>
                     <div className="flex items-center gap-3">
                       {ayatMistakes > 0 && <span className="text-xs text-red-400 font-semibold">{ayatMistakes} salah</span>}
-                      {isActive && isListening && <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold animate-pulse"><Mic size={12} /> Live...</div>}
+                      {isActive && isListening && <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold lg:animate-pulse"><Mic size={12} /> Live...</div>}
                     </div>
                  </div>
 
-                 <div className="text-right mb-6 leading-[2.5]" dir="rtl">
+                 <div className="text-right mb-4 sm:mb-6 leading-[2.3] sm:leading-[2.5]" dir="rtl">
                     {ayat.words.map((word, wIdx) => {
                        const pos = ayat.startPos + wIdx;
                        const status = wordStatus[pos];
@@ -710,12 +770,12 @@ const MushafHafalan = () => {
                        const showPeek = isActive && isPeeking;
                        const hasMinor = status === 'correct' && minorByPos[pos];
                        const style = showPeek && !['given', 'correct', 'corrected'].includes(status)
-                         ? 'text-white opacity-50 blur-0'
+                         ? 'text-white opacity-50'
                          : hasMinor ? MINOR_STYLE : WORD_STYLE[status] || HIDDEN_STYLE; // BURAM
                        return (
                          <span key={wIdx}
                            title={status === 'corrected' ? noteFor(pos) : hasMinor ? minorByPos[pos].join(' · ') : undefined}
-                           className={`inline-block mx-1 text-3xl md:text-4xl font-serif font-medium transition-all duration-200 px-1 rounded ${style} ${isCurrent && status !== 'wrong' ? 'border-b-2 border-emerald-400/70' : ''}`}
+                           className={`inline-block mx-0.5 sm:mx-1 my-0.5 text-3xl md:text-4xl font-serif font-medium lg:transition-all lg:duration-200 px-1 rounded ${style} ${isCurrent && status !== 'wrong' ? 'border-b-2 border-emerald-400/70' : ''}`}
                          >
                            {word.text}
                          </span>
@@ -761,17 +821,17 @@ const MushafHafalan = () => {
       </div>
 
       {/* FOOTER */}
-      <div className="fixed bottom-6 left-0 right-0 lg:left-64 z-30 px-4">
-        <div className="max-w-md mx-auto bg-slate-800/90 backdrop-blur-md border border-white/10 rounded-full p-2 shadow-2xl flex items-center justify-between pl-6 pr-2">
-          <div className="flex gap-4">
+      <div className="fixed bottom-4 lg:bottom-6 left-0 right-0 lg:left-64 z-30 px-3 sm:px-4">
+        <div className="max-w-md mx-auto bg-slate-800/95 lg:bg-slate-800/90 backdrop-blur-md border border-white/10 rounded-full p-2 shadow-2xl flex items-center justify-between pl-5 sm:pl-6 pr-2">
+          <div className="flex gap-3 sm:gap-4">
             <div className="flex flex-col"><span className="text-[10px] text-slate-400 uppercase font-bold">Progres</span><span className="text-emerald-400 font-bold text-sm">{Math.round(progressPercent)}%</span></div>
             <div className="flex flex-col"><span className="text-[10px] text-slate-400 uppercase font-bold">Salah</span><span className={`font-bold text-sm ${mistakeCount ? 'text-red-400' : 'text-slate-300'}`}>{mistakeCount}</span></div>
           </div>
           <div className="flex items-center gap-2">
-             <button onClick={handleRestart} title="Ulangi halaman" className="w-10 h-10 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition-colors"><RotateCcw size={18}/></button>
-             <button onClick={() => { setIsPeeking(true); setTimeout(() => setIsPeeking(false), 1000); }} title="Intip ayat" className="w-10 h-10 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition-colors"><Eye size={18}/></button>
+             <button onClick={handleRestart} title="Ulangi halaman" aria-label="Ulangi halaman" className="w-11 h-11 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition-colors"><RotateCcw size={18}/></button>
+             <button onClick={() => { setIsPeeking(true); setTimeout(() => setIsPeeking(false), 1000); }} title="Intip ayat" aria-label="Intip ayat" className="w-11 h-11 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition-colors"><Eye size={18}/></button>
 
-             <button onClick={toggleListening} className={`h-14 px-6 rounded-full flex items-center gap-2 font-bold text-white transition-all duration-300 shadow-lg ${isListening ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
+             <button onClick={toggleListening} className={`h-14 px-5 sm:px-6 rounded-full flex items-center gap-2 font-bold text-white lg:transition-all lg:duration-300 shadow-lg ${isListening ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
                {isListening ? <><Pause size={20} fill="currentColor"/> Stop</> : <><Mic size={20}/> Mulai</>}
              </button>
           </div>

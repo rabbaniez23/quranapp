@@ -75,7 +75,7 @@ const PilihSurat = () => {
               <button 
                 key={surah.nomor} 
                 onClick={() => navigate(`/quran-digital?surahId=${surah.nomor}`)}
-                className="group relative text-left h-full transition-all duration-300 hover:-translate-y-1"
+                className="cv-auto-sm group relative text-left h-full transition-all duration-300 hover:-translate-y-1"
               >
                 <div className="h-full bg-slate-800/40 border border-white/5 p-4 rounded-xl hover:bg-slate-800 hover:border-emerald-500/30 transition-all flex flex-col justify-between group-hover:shadow-[0_4px_20px_rgba(16,185,129,0.1)]">
                   

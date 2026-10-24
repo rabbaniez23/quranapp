@@ -275,7 +275,7 @@ const QuranDigital = () => {
               <div 
                 key={verse.nomorAyat} 
                 ref={el => verseRefs.current[verse.nomorAyat] = el}
-                className={`transition-all duration-500 ${isMatch ? 'translate-x-2' : ''}`}
+                className={`cv-auto transition-all duration-500 ${isMatch ? 'translate-x-2' : ''}`}
               >
                 <Card className={`p-0 overflow-hidden border-slate-700 bg-slate-800/30 hover:border-slate-600 transition-colors 
                   ${isActive ? 'ring-1 ring-emerald-500 bg-emerald-900/10' : ''} 
@@ -338,7 +338,7 @@ const QuranDigital = () => {
 
             <div className="flex items-center justify-between mt-1">
                 <div className="w-1/3 text-white text-xs truncate font-bold">
-                    {isFullSurahMode ? `Full Surat: ${currentSurah?.namaLatin}` : `Ayat ${activeVerse}`}
+                    {isFullSurahMode ? `Full Surat: ${currentSurah?.namaLatin}` : activeVerse ? `Ayat ${activeVerse}` : ''}
                 </div>
 
                 <div className="flex items-center justify-center gap-4 w-1/3">

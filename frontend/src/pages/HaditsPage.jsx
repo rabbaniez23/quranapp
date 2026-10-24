@@ -168,7 +168,7 @@ const HaditsPage = () => {
           <div className="text-center text-red-400 p-10 bg-red-500/10 rounded-2xl">{errorMsg}</div>
         ) : (
           hadithList.map((hadith) => (
-            <Card key={hadith.number} className="p-0 overflow-hidden border-slate-700 bg-slate-800/40 hover:border-amber-500/30 transition-all hover:bg-slate-800/60 group">
+            <Card key={hadith.number} className="cv-auto p-0 overflow-hidden border-slate-700 bg-slate-800/40 hover:border-amber-500/30 transition-all hover:bg-slate-800/60 group">
               
               {/* Header Card */}
               <div className="flex justify-between items-center px-6 py-4 bg-white/5 border-b border-white/5">
