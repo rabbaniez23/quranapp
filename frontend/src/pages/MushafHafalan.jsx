@@ -129,7 +129,6 @@ const MushafHafalan = () => {
   const [cursor, setCursor] = useState(0); // posisi kata yang sedang ditunggu
   const [isListening, setIsListening] = useState(false);
   const [usingAi, setUsingAi] = useState(false);
-  const [spokenText, setSpokenText] = useState("");
   const [isPeeking, setIsPeeking] = useState(false);
   const [notification, setNotification] = useState(null);
   const [showAiNotice, setShowAiNotice] = useState(false);
@@ -289,7 +288,8 @@ const MushafHafalan = () => {
 
   const handleAiEvent = (event) => {
     if (event.type === 'error') {
-      triggerNotif(event.pesan, "error");
+      console.warn("Server AI:", event.pesan);
+      if (isListeningRef.current) fallbackToGoogle();
       return;
     }
     if (event.type !== 'kata' && event.type !== 'salah') return;
@@ -321,9 +321,8 @@ const MushafHafalan = () => {
     const pos = latestRef.current.pos;
     const ayat = ayatListRef.current[expectedRef.current[pos].ayatIdx];
     const conn = await connectHafalan(tokenRef.current, handleAiEvent, () => {
-      if (!isListeningRef.current) return;
-      stopMicrophone();
-      triggerNotif("Koneksi ke server AI terputus.", "error");
+      if (!isListeningRef.current || aiConnRef.current !== conn) return;
+      fallbackToGoogle();
     });
     try {
       conn.start(ayat.surahId, Number(ayat.verseNo), pos - ayat.startPos);
@@ -338,7 +337,16 @@ const MushafHafalan = () => {
     micSinceRef.current = Date.now();
     setIsListening(true);
     setUsingAi(true);
-    setSpokenText("");
+  };
+
+  // Server AI putus di tengah murojaah → lanjut diam-diam dengan Google dari kata yang sama, tanpa pemberitahuan
+  const fallbackToGoogle = () => {
+    const conn = aiConnRef.current;
+    aiConnRef.current = null;
+    aiOnlineRef.current = false; // dicek lagi tiap 15 detik; sesi berikutnya kembali ke AI kalau sudah menyala
+    if (micStreamRef.current) { micStreamRef.current.stop(); micStreamRef.current = null; }
+    if (conn) conn.close();
+    startGoogle();
   };
 
   // --- 3. MODE CADANGAN: GOOGLE SPEECH (dipakai kalau server AI mati; tanpa cek harakat) ---
@@ -365,7 +373,6 @@ const MushafHafalan = () => {
     recognition.onstart = () => {
       isListeningRef.current = true;
       setIsListening(true);
-      setSpokenText("");
     };
 
     recognition.onresult = (event) => {
@@ -377,7 +384,6 @@ const MushafHafalan = () => {
         else interim += ` ${event.results[i][0].transcript}`;
       }
       if (!(final + interim).trim()) return;
-      setSpokenText((final + interim).trim());
       if (!isListeningRef.current) return;
       applyResult(alignRecitation(expectedRef.current, committedRef.current, sessionStartRef.current, final, interim,
         { strict: true }));
@@ -398,7 +404,6 @@ const MushafHafalan = () => {
     // Chrome otomatis mematikan mic setelah hening sebentar, jadi dinyalakan lagi
     recognition.onend = () => {
       commitSession();
-      setSpokenText("");
       if (isListeningRef.current) {
         setTimeout(() => {
           try { recognition.start(); }
@@ -446,13 +451,10 @@ const MushafHafalan = () => {
         await startAi();
         return;
       } catch (e) {
-        console.warn("Mode AI gagal:", e);
-        triggerNotif("Server AI tidak bisa dihubungi, harakat tidak dicek.", "error");
+        console.warn("Mode AI gagal, pakai Google:", e);
       }
-    } else {
-      triggerNotif("Server AI belum menyala, harakat tidak dicek.", "info");
     }
-    startGoogle();
+    startGoogle(); // server AI mati → Google, tanpa pemberitahuan ke pengguna
   };
 
   const toggleListening = () => {
@@ -511,7 +513,6 @@ const MushafHafalan = () => {
     setNotesByPos({});
     setMinorByPos({});
     setCursor(initial.pos);
-    setSpokenText("");
   };
 
   const handleRestart = () => {
@@ -676,7 +677,6 @@ const MushafHafalan = () => {
               <span className="w-2 h-2 bg-red-500 rounded-full animate-ping"></span> Mendengarkan
             </p>
             {usingAi && aiRecording && <p className="text-amber-300/80 text-[10px] mt-0.5">Rekaman disimpan untuk perbaikan aplikasi</p>}
-            {!usingAi && <p className="text-emerald-300 text-xl font-serif leading-relaxed mt-1" dir="rtl">{spokenText || "..."}</p>}
          </div>
       </div>
 

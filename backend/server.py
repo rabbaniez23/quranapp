@@ -1,6 +1,11 @@
 """Backend QuranApp: akun (daftar/masuk), riwayat murojaah, cek hafalan real-time (WebSocket),
 dan cek tajwid per ayat.
 
+Dua cara jalan:
+- Semua di satu komputer (default): model AI dimuat di sini.
+- AI_SERVER=http://<ip>:8020 di .env: model AI ada di komputer lain (ai_worker.py), cek hafalan
+  diteruskan ke sana. Kalau komputer AI mati, website tetap jalan dan cek hafalan pakai Google.
+
 Jalankan (dari folder backend):
     .venv\\Scripts\\python server.py
 """
@@ -12,7 +17,7 @@ import re
 import sys
 import threading
 import time
-import traceback
+import urllib.request
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import Literal
@@ -20,7 +25,7 @@ from dataclasses import asdict
 
 import numpy as np
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,8 +35,6 @@ from starlette.concurrency import run_in_threadpool
 import akun
 import database
 import progres
-from hafalan_stream import HafalanSession
-from tajwid import SAMPLE_RATE, TajwidChecker
 
 # Supaya log berhuruf Arab/emoji tidak error saat output dialihkan ke file (Windows cp1252)
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -53,14 +56,17 @@ PORT = int(os.getenv("PORT", "8010"))
 # Alamat frontend yang boleh memanggil API ini (pisahkan dengan koma)
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
 MAX_SECONDS = 90
+SAMPLE_RATE = 16000
 # SIMPAN_REKAMAN=1 → tiap sesi murojaah disimpan ke folder rekaman/ (audio + keputusan AI),
 # untuk dianalisis ulang kalau ada kata yang salah dinilai. Hanya di komputer ini.
 SAVE_RECORDINGS = os.getenv("SIMPAN_REKAMAN") == "1"
-RECORDINGS_DIR = os.path.join(os.path.dirname(__file__), "rekaman")
+# Model AI di komputer lain (ai_worker.py). Kosong = model dimuat di sini.
+AI_SERVER = os.getenv("AI_SERVER", "").rstrip("/")
+AI_KUNCI = os.getenv("AI_KUNCI", "")
 # Hasil `npm run build` frontend; kalau ada, ikut disajikan dari sini (cukup satu alamat di server)
 FRONTEND_DIST = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
 
-checker: TajwidChecker | None = None
+checker = None  # TajwidChecker, hanya kalau model dimuat di sini
 gpu_lock = threading.Lock()  # satu GPU, jadi proses satu per satu
 
 
@@ -69,10 +75,14 @@ async def lifespan(_app: FastAPI):
     global checker
     database.init_db()
     print(f"🗄️  Database siap ({database.engine.url.render_as_string(hide_password=True)})")
-    t = time.time()
-    print("⏳ Memuat model tajwid...")
-    checker = TajwidChecker()
-    print(f"✅ Model siap di {checker.device.upper()} ({time.time() - t:.0f} detik)")
+    if AI_SERVER:
+        print(f"🔗 Model AI di {AI_SERVER}")
+    else:
+        from tajwid import TajwidChecker  # torch hanya di-import kalau modelnya memang di sini
+        t = time.time()
+        print("⏳ Memuat model tajwid...")
+        checker = TajwidChecker()
+        print(f"✅ Model siap di {checker.device.upper()} ({time.time() - t:.0f} detik)")
     yield
 
 
@@ -192,8 +202,32 @@ def progres_analitik(hari: int = Query(30, ge=7, le=365), user: dict = Depends(p
     return progres.analitik(user["id"], hari)
 
 
+# --- STATUS SERVER AI (kalau modelnya di komputer lain) ---
+_status_ai = {"waktu": 0.0, "hasil": {"status": "offline"}}
+
+
+def _tanya_ai() -> dict:
+    req = urllib.request.Request(f"{AI_SERVER}/api/health", headers={"X-AI-Kunci": AI_KUNCI})
+    with urllib.request.urlopen(req, timeout=2) as r:
+        return json.load(r)
+
+
+async def status_ai() -> dict:
+    # Disimpan 10 detik supaya tiap pengunjung tidak memicu panggilan ke komputer AI
+    if time.time() - _status_ai["waktu"] > 10:
+        try:
+            hasil = await run_in_threadpool(_tanya_ai)
+        except Exception:
+            hasil = {"status": "offline"}
+        _status_ai.update(waktu=time.time(), hasil=hasil)
+    return _status_ai["hasil"]
+
+
 @app.get("/api/health")
-def health():
+async def health():
+    if AI_SERVER:
+        ai = await status_ai()
+        return {"status": ai.get("status", "offline"), "device": ai.get("device"), "rekaman": ai.get("rekaman", False)}
     return {
         "status": "ok" if checker else "loading",
         "device": checker.device if checker else None,
@@ -216,7 +250,7 @@ async def cek_tajwid(
     if len(wave) > MAX_SECONDS * SAMPLE_RATE:
         raise HTTPException(413, f"Audio terlalu panjang (maks {MAX_SECONDS} detik)")
     if checker is None:
-        raise HTTPException(503, "Model masih dimuat")
+        raise HTTPException(503, "Model tidak tersedia di server ini" if AI_SERVER else "Model masih dimuat")
 
     def run():
         with gpu_lock:
@@ -256,82 +290,65 @@ async def ws_hafalan(ws: WebSocket):
         await ws.close(code=4401)
         return
     await ws.accept()
+    if AI_SERVER:
+        await teruskan_ke_ai(ws)
+        return
     if checker is None:
         await ws.send_json({"type": "error", "pesan": "Model masih dimuat, coba lagi sebentar."})
         await ws.close()
         return
 
+    from hafalan_ws import layani_hafalan
+
     def predict(wave, ref):
         with gpu_lock:
             return checker.predict(wave, ref)
 
-    session = HafalanSession(predict)
-    busy = False
-    # Untuk SIMPAN_REKAMAN: semua audio + perintah + event, dengan posisi sampel audio saat itu
-    rec_audio: list[np.ndarray] = []
-    rec_log: list[dict] = []
-    rec_samples = 0
+    await layani_hafalan(ws, predict, SAVE_RECORDINGS)
 
-    async def pump():
-        # Proses audio yang masuk; selama diproses, audio baru tetap ditampung
-        nonlocal busy
-        try:
-            while session.has_new_audio():
-                for event in await run_in_threadpool(session.process):
-                    await ws.send_json(event)
-                    if SAVE_RECORDINGS:
-                        rec_log.append({"sampel": rec_samples, "event": event})
-        except Exception:
-            traceback.print_exc()
-            await ws.send_json({"type": "error", "pesan": "Terjadi kesalahan di server."})
-        finally:
-            busy = False
 
-    await ws.send_json({"type": "siap"})
+async def teruskan_ke_ai(ws: WebSocket):
+    """Teruskan sesi cek hafalan ke ai_worker.py apa adanya (dua arah).
+    Kalau komputer AI tidak bisa dihubungi atau putus, browser menerima error/tutup → pindah ke Google."""
+    from websockets.asyncio.client import connect
+
     try:
+        ai = await connect(f"{AI_SERVER.replace('http', 'ws', 1)}/ws/ai", additional_headers={"X-AI-Kunci": AI_KUNCI},
+                           open_timeout=4, max_size=2**22)
+    except Exception as e:
+        print(f"⚠️  Server AI tidak bisa dihubungi: {e!r}")
+        _status_ai.update(waktu=time.time(), hasil={"status": "offline"})
+        await ws.send_json({"type": "error", "pesan": "Server AI tidak tersedia."})
+        await ws.close()
+        return
+
+    async def ke_ai():
         while True:
             message = await ws.receive()
             if message["type"] == "websocket.disconnect":
-                break
-            data = message.get("bytes")
-            if data is not None:
-                if len(data) % 4 == 0:
-                    chunk = np.frombuffer(data, dtype=np.float32).copy()
-                    session.feed(chunk)
-                    if SAVE_RECORDINGS:
-                        rec_audio.append(chunk)
-                        rec_samples += len(chunk)
+                return
+            if message.get("bytes") is not None:
+                await ai.send(message["bytes"])
             elif message.get("text"):
-                command = json.loads(message["text"])
-                if SAVE_RECORDINGS:
-                    rec_log.append({"sampel": rec_samples, "perintah": command})
-                if command.get("type") == "mulai":
-                    try:
-                        session.start(int(command["surat"]), int(command["ayat"]), int(command.get("kata", 0)))
-                    except Exception:
-                        await ws.send_json({"type": "error", "pesan": "Surat/ayat tidak valid."})
-                elif command.get("type") == "berhenti":
-                    session.stop()
-            if not busy and session.has_new_audio():
-                busy = True
-                asyncio.create_task(pump())
-    except WebSocketDisconnect:
-        pass
+                await ai.send(message["text"])
+
+    async def ke_browser():
+        async for message in ai:
+            if isinstance(message, str):
+                await ws.send_text(message)
+
+    tugas = [asyncio.create_task(ke_ai()), asyncio.create_task(ke_browser())]
+    try:
+        await asyncio.wait(tugas, return_when=asyncio.FIRST_COMPLETED)
     finally:
-        session.stop()
-        if SAVE_RECORDINGS and rec_samples > SAMPLE_RATE:
-            save_recording(np.concatenate(rec_audio), rec_log)
-
-
-def save_recording(wave: np.ndarray, log: list[dict]):
-    import soundfile as sf
-
-    os.makedirs(RECORDINGS_DIR, exist_ok=True)
-    name = time.strftime("%Y%m%d-%H%M%S")
-    sf.write(os.path.join(RECORDINGS_DIR, f"{name}.wav"), wave, SAMPLE_RATE)
-    with open(os.path.join(RECORDINGS_DIR, f"{name}.json"), "w", encoding="utf-8") as f:
-        json.dump(log, f, ensure_ascii=False, indent=1)
-    print(f"💾 Rekaman disimpan: rekaman/{name}.wav ({len(wave) / SAMPLE_RATE:.0f} detik)")
+        for t in tugas:
+            t.cancel()
+        await asyncio.gather(*tugas, return_exceptions=True)
+        await ai.close()
+        try:
+            await ws.close()
+        except Exception:
+            pass  # browser sudah menutup duluan
 
 
 # --- FRONTEND (harus paling akhir, karena menangkap semua alamat lain) ---
