@@ -116,6 +116,7 @@ const isMatchLonggar = (spoken, target) => {
   return Math.max(spoken.length, target.length) >= 4 && similarity(spoken, target) >= MIRIP_LONGGAR;
 };
 
+
 // --- 4. PENCOCOKAN BERURUTAN ---
 // expected  : daftar kata satu halaman [{ skeleton, wordIdx }]
 // base      : status hasil sesi mic sebelumnya { status: [], heard: [] }
@@ -180,7 +181,8 @@ export const alignRecitation = (expected, base, startPos, finalText, interimText
       continue;
     }
     // b. Google memecah satu kata jadi dua (يا أيها → يٰٓأَيُّهَا). Alif di depan kata kedua jadi di tengah.
-    if (next && isMatch(tok.sk + next.sk.replace(/^ا/, ''), target, true)) {
+    const disambung = next && tok.sk + next.sk.replace(/^ا/, '');
+    if (next && (longgar ? isMatchLonggar(disambung, target) : isMatch(disambung, target, true))) {
       markCorrect(pos);
       pos++; i += 2;
       continue;
@@ -209,6 +211,10 @@ export const alignRecitation = (expected, base, startPos, finalText, interimText
     // f. Ada kata yang terlewat
     const k = findSkip(tok.sk, next);
     if (k === -1) break;
+    // Longgar: Google (terutama di HP) kadang memotong kata panjang yang dibaca dipanjangkan: "يسو" dulu
+    // sebagai hasil akhir, "رون" menyusul. Kata akhir yang masih lebih pendek dari kata yang ditunggu dan
+    // belum ada hasil akhir sesudahnya → tunggu sisanya (lalu disambung di aturan b), jangan langsung "teet".
+    if (longgar && k === 0 && i + 1 >= finalTokens.length && tok.sk.length < target.length) break;
     if (strict) {
       // Mode ketat: tandai salah dan tetap tunggu kata ini dibaca benar.
       // Longgar: kata yang sama sekali tidak mirip (dan bukan kata sesudahnya) = salah dengar Google, diabaikan.
