@@ -93,11 +93,60 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
 )
-pembatas_login = akun.PembatasPercobaan()
-# Kirim kode verifikasi: maksimal 5 per email per jam, dan 100 per jam untuk seluruh website
+
+# --- HEADER KEAMANAN (untuk semua jawaban: halaman, file, dan API) ---
+# CSP: halaman hanya boleh memuat skrip/gaya/koneksi dari sumber yang memang dipakai website ini
+# (Google Sign-In, Google Fonts, API Al-Quran/hadits/jadwal sholat). blob: untuk AudioWorklet mikrofon.
+_CSP = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' blob: https://accounts.google.com/gsi/client",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: https:",
+    "media-src 'self' blob: https:",
+    "connect-src 'self' {ws} https://api.quran.com https://verses.quran.com https://equran.id "
+    "https://api.myquran.com https://hadis-api-id.vercel.app https://accounts.google.com/gsi/",
+    "frame-src https://accounts.google.com/gsi/",
+    "frame-ancestors 'none'",  # tidak boleh dimuat di dalam iframe situs lain (clickjacking)
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+])
+
+
+@app.middleware("http")
+async def header_keamanan(request: Request, call_next):
+    response = await call_next(request)
+    host = request.headers.get("host", "")
+    h = response.headers
+    h.setdefault("Content-Security-Policy", _CSP.format(ws=f"wss://{host} ws://{host}"))
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    h.setdefault("Permissions-Policy", "microphone=(self), camera=(), geolocation=(), payment=()")
+    h.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")  # popup Masuk dengan Google
+    if request.headers.get("x-forwarded-proto") == "https":  # lewat Cloudflare
+        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
+
+
+def ip_klien(request: Request) -> str:
+    """IP pengunjung. Di server, semua permintaan datang dari cloudflared (127.0.0.1), jadi IP aslinya
+    diambil dari header Cloudflare; header itu hanya dipercaya kalau permintaannya memang dari mesin ini."""
+    host = request.client.host if request.client else ""
+    if host in ("127.0.0.1", "::1"):
+        return (request.headers.get("cf-connecting-ip")
+                or request.headers.get("x-forwarded-for", "").split(",")[0].strip() or host)
+    return host
+
+
+pembatas_login = akun.PembatasPercobaan()                               # 8 gagal per username / 10 menit
+pembatas_login_ip = akun.PembatasPercobaan(batas=30, jendela=600)       # 30 gagal per IP / 10 menit
+# Kirim kode ke email (daftar & lupa kata sandi): per email, per IP, dan batas total website
 # (supaya website ini tidak bisa dipakai bot untuk membanjiri email orang)
 pembatas_kode_email = akun.PembatasPercobaan(batas=5, jendela=3600)
-pembatas_kode_semua = akun.PembatasPercobaan(batas=100, jendela=3600)
+pembatas_kode_ip = akun.PembatasPercobaan(batas=10, jendela=3600)
+pembatas_kode_semua = akun.PembatasPercobaan(batas=300, jendela=3600)
 
 
 # --- AKUN ---
@@ -141,11 +190,23 @@ class GoogleBody(BaseModel):
     credential: str = Field(max_length=4096)
 
 
-def _boleh_kirim_kode(email: str):
+class ResetBody(BaseModel):
+    email: str = Field(max_length=254)
+    kode: str = Field(max_length=10)
+    password: str = Field(max_length=200)
+
+
+class HapusAkunBody(BaseModel):
+    password: str = Field(default="", max_length=200)
+    konfirmasi: str = Field(default="", max_length=40)
+
+
+def _boleh_kirim_kode(email: str, ip: str):
     email = email.strip().lower()
-    if pembatas_kode_email.diblokir(email) or pembatas_kode_semua.diblokir("semua"):
+    if pembatas_kode_email.diblokir(email) or pembatas_kode_ip.diblokir(ip) or pembatas_kode_semua.diblokir("semua"):
         raise HTTPException(429, "Terlalu banyak permintaan kode. Coba lagi nanti.")
     pembatas_kode_email.catat_gagal(email)
+    pembatas_kode_ip.catat_gagal(ip)
     pembatas_kode_semua.catat_gagal("semua")
 
 
@@ -156,11 +217,11 @@ def auth_config():
 
 
 @app.post("/api/auth/daftar")
-def daftar(body: DaftarBody):
+def daftar(body: DaftarBody, request: Request):
     """Langkah 1: data dicek, kode verifikasi dikirim ke email. Akun baru dibuat setelah kodenya benar."""
     if body.website:  # bot: pura-pura berhasil, tapi tidak ada yang dikirim/dibuat
         return {"email": body.email.strip().lower(), "perlu_verifikasi": True}
-    _boleh_kirim_kode(body.email)
+    _boleh_kirim_kode(body.email, ip_klien(request))
     try:
         email = akun.mulai_daftar(body.nama, body.username, body.email, body.password)
     except akun.AkunError as e:
@@ -172,8 +233,8 @@ def daftar(body: DaftarBody):
 
 
 @app.post("/api/auth/daftar/kirim-ulang")
-def kirim_ulang(body: EmailBody):
-    _boleh_kirim_kode(body.email)
+def kirim_ulang(body: EmailBody, request: Request):
+    _boleh_kirim_kode(body.email, ip_klien(request))
     try:
         akun.kirim_ulang_kode(body.email)
     except akun.AkunError as e:
@@ -204,13 +265,14 @@ def masuk_google(body: GoogleBody):
 
 
 @app.post("/api/auth/masuk")
-def masuk(body: MasukBody):
-    kunci = body.username.strip().lower()
-    if pembatas_login.diblokir(kunci):
+def masuk(body: MasukBody, request: Request):
+    kunci, ip = body.username.strip().lower(), ip_klien(request)
+    if pembatas_login.diblokir(kunci) or pembatas_login_ip.diblokir(ip):
         raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi 10 menit lagi.")
     user = akun.masuk(body.username, body.password)
     if user is None:
         pembatas_login.catat_gagal(kunci)
+        pembatas_login_ip.catat_gagal(ip)
         raise HTTPException(401, "Username/email atau kata sandi salah.")
     pembatas_login.reset(kunci)
     return {"token": akun.buat_sesi(user["id"]), "user": user}
@@ -219,6 +281,45 @@ def masuk(body: MasukBody):
 @app.get("/api/auth/saya")
 def saya(user: dict = Depends(pengguna)):
     return {"user": user}
+
+
+@app.post("/api/auth/lupa-sandi")
+def lupa_sandi(body: EmailBody, request: Request):
+    """Kirim kode ganti kata sandi. Jawabannya selalu sama, terdaftar atau tidak emailnya."""
+    _boleh_kirim_kode(body.email, ip_klien(request))
+    try:
+        akun.minta_reset(body.email)
+    except OSError as e:
+        print(f"⚠️  Gagal kirim email: {e!r}")
+        raise HTTPException(503, "Email gagal dikirim. Coba lagi sebentar.") from e
+    return {"ok": True}
+
+
+@app.post("/api/auth/lupa-sandi/ganti")
+def ganti_sandi(body: ResetBody, request: Request):
+    ip = ip_klien(request)
+    if pembatas_login_ip.diblokir(ip):
+        raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi 10 menit lagi.")
+    try:
+        akun.reset_sandi(body.email, body.kode, body.password)
+    except akun.AkunError as e:
+        pembatas_login_ip.catat_gagal(ip)
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True}
+
+
+@app.post("/api/auth/hapus-akun")
+def hapus_akun(body: HapusAkunBody, user: dict = Depends(pengguna)):
+    kunci = f"hapus:{user['id']}"
+    if pembatas_login.diblokir(kunci):
+        raise HTTPException(429, "Terlalu banyak percobaan. Coba lagi 10 menit lagi.")
+    try:
+        akun.hapus_akun(user["id"], body.password, body.konfirmasi)
+    except akun.AkunError as e:
+        pembatas_login.catat_gagal(kunci)
+        raise HTTPException(400, str(e)) from e
+    putuskan_sesi_hafalan(user["id"])
+    return {"ok": True}
 
 
 @app.post("/api/auth/keluar")
@@ -358,25 +459,50 @@ async def ws_hafalan(ws: WebSocket):
         return
     # Hanya pengguna yang sudah masuk (token dikirim lewat ?token=..., karena browser
     # tidak bisa menambah header Authorization ke WebSocket)
-    if akun.pengguna_dari_token(ws.query_params.get("token")) is None:
+    user = akun.pengguna_dari_token(ws.query_params.get("token"))
+    if user is None:
         await ws.close(code=4401)
         return
     await ws.accept()
-    if AI_SERVER:
-        await teruskan_ke_ai(ws)
-        return
-    if checker is None:
-        await ws.send_json({"type": "error", "pesan": "Model masih dimuat, coba lagi sebentar."})
-        await ws.close()
-        return
+    # Satu akun satu sesi: sesi lama (mis. tab lain) diputus, supaya satu akun tidak bisa memborong GPU
+    putuskan_sesi_hafalan(user["id"])
+    sesi_hafalan[user["id"]] = ws
+    try:
+        if AI_SERVER:
+            await teruskan_ke_ai(ws)
+            return
+        if checker is None:
+            await ws.send_json({"type": "error", "pesan": "Model masih dimuat, coba lagi sebentar."})
+            await ws.close()
+            return
 
-    from hafalan_ws import layani_hafalan
+        from hafalan_ws import layani_hafalan
 
-    def predict(wave, ref):
-        with gpu_lock:
-            return checker.predict(wave, ref)
+        def predict(wave, ref):
+            with gpu_lock:
+                return checker.predict(wave, ref)
 
-    await layani_hafalan(ws, predict, SAVE_RECORDINGS)
+        await layani_hafalan(ws, predict, SAVE_RECORDINGS)
+    finally:
+        if sesi_hafalan.get(user["id"]) is ws:
+            del sesi_hafalan[user["id"]]
+
+
+sesi_hafalan: dict[int, WebSocket] = {}  # user_id -> sesi cek hafalan yang sedang berjalan
+MAKS_PESAN_AUDIO = 1 << 17                # 128 KB; potongan normal 16 KB (0,25 detik)
+
+
+def putuskan_sesi_hafalan(user_id: int):
+    lama = sesi_hafalan.pop(user_id, None)
+    if lama is not None:
+        asyncio.create_task(_tutup_diam(lama, 4409))
+
+
+async def _tutup_diam(ws: WebSocket, code: int):
+    try:
+        await ws.close(code=code)
+    except Exception:
+        pass  # sudah tertutup
 
 
 async def teruskan_ke_ai(ws: WebSocket):
@@ -400,7 +526,8 @@ async def teruskan_ke_ai(ws: WebSocket):
             if message["type"] == "websocket.disconnect":
                 return
             if message.get("bytes") is not None:
-                await ai.send(message["bytes"])
+                if len(message["bytes"]) <= MAKS_PESAN_AUDIO:  # potongan aneh yang terlalu besar dibuang
+                    await ai.send(message["bytes"])
             elif message.get("text"):
                 await ai.send(message["text"])
 

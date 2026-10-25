@@ -19,6 +19,10 @@ from hafalan_stream import HafalanSession
 from tajwid import SAMPLE_RATE
 
 RECORDINGS_DIR = os.path.join(os.path.dirname(__file__), "rekaman")
+# Pengaman supaya satu sesi tidak bisa memborong GPU
+MAKS_DETIK_SESI = 45 * 60      # sesi lebih lama diputus (browser lalu lanjut dengan Google)
+MAKS_PESAN = 1 << 17           # 128 KB; potongan normal 16 KB (0,25 detik)
+LONGGAR_DETIK = 10             # audio boleh mendahului waktu nyata paling banyak sekian detik
 
 
 async def layani_hafalan(ws: WebSocket, predict, simpan_rekaman: bool = False):
@@ -46,13 +50,24 @@ async def layani_hafalan(ws: WebSocket, predict, simpan_rekaman: bool = False):
             busy = False
 
     await ws.send_json({"type": "siap"})
+    mulai = time.monotonic()
+    sampel_diterima = 0
     try:
         while True:
             message = await ws.receive()
             if message["type"] == "websocket.disconnect":
                 break
+            lama = time.monotonic() - mulai
+            if lama > MAKS_DETIK_SESI:
+                await ws.close(code=4408)
+                break
             data = message.get("bytes")
             if data is not None:
+                # Buang potongan yang terlalu besar, dan audio yang dikirim lebih cepat dari waktu nyata
+                # (bukan dari mikrofon sungguhan)
+                if len(data) > MAKS_PESAN or sampel_diterima > (lama + LONGGAR_DETIK) * SAMPLE_RATE:
+                    continue
+                sampel_diterima += len(data) // 4
                 if len(data) % 4 == 0:
                     chunk = np.frombuffer(data, dtype=np.float32).copy()
                     session.feed(chunk)

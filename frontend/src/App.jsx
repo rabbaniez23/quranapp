@@ -9,6 +9,9 @@ import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import KebijakanPrivasi from './pages/KebijakanPrivasi';
+import KetentuanPage from './pages/KetentuanPage';
+import LisensiPage from './pages/LisensiPage';
+import LupaSandiPage from './pages/LupaSandiPage';
 
 // Halaman setelah masuk
 import Dashboard from './pages/Dashboard';
@@ -19,6 +22,7 @@ import HaditsPage from './pages/HaditsPage';
 import JadwalSholat from './pages/JadwalSholat';
 import ArtikelPage from './pages/ArtikelPage';
 import Progres from './pages/Progres';
+import AkunPage from './pages/AkunPage';
 
 const NotFound = () => (
   <div className="min-h-[60vh] flex flex-col items-center justify-center text-center gap-3">
@@ -38,6 +42,9 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/privasi" element={<KebijakanPrivasi />} />
+            <Route path="/ketentuan" element={<KetentuanPage />} />
+            <Route path="/lisensi" element={<LisensiPage />} />
+            <Route path="/lupa-sandi" element={<LupaSandiPage />} />
             <Route path="*" element={<NotFound />} />
           </Route>
 
@@ -45,6 +52,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/cek-hafalan" element={<MushafHafalan />} />
             <Route path="/progres" element={<Progres />} />
+            <Route path="/akun" element={<AkunPage />} />
             <Route path="/pilih-surat" element={<PilihSurat />} />
             <Route path="/quran-digital" element={<QuranDigital />} />
             <Route path="/hadits" element={<HaditsPage />} />

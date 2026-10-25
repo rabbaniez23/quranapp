@@ -55,6 +55,16 @@ pendaftaran = Table(
     Column("dikirim", DateTime, nullable=False),                     # kode terakhir dikirim
 )
 
+# Kode untuk mengganti kata sandi yang lupa (satu baris per pengguna, dihapus setelah dipakai)
+reset_sandi = Table(
+    "reset_sandi", metadata,
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, autoincrement=False),
+    Column("kode_hash", String(64), nullable=False),
+    Column("kedaluwarsa", DateTime, nullable=False),
+    Column("percobaan", SmallInteger, nullable=False, default=0),
+    Column("dikirim", DateTime, nullable=False),
+)
+
 sessions = Table(
     "sessions", metadata,
     Column("token_hash", String(64), primary_key=True),

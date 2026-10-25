@@ -55,7 +55,8 @@ def _token_hash(token: str) -> str:
 
 
 def _public(row) -> dict:
-    return {"id": row.id, "nama": row.nama, "username": row.username, "email": row.email}
+    return {"id": row.id, "nama": row.nama, "username": row.username, "email": row.email,
+            "punya_sandi": row.password_hash != "!"}  # akun dari Google belum tentu punya kata sandi
 
 
 def _rapikan_email(email: str) -> str:
@@ -153,7 +154,77 @@ def verifikasi_daftar(email: str, kode: str) -> dict:
                 nama=p.nama, username=p.username, password_hash=p.password_hash, email=email, dibuat=now))
     except IntegrityError as e:  # username/email keburu dipakai orang lain selama menunggu kode
         raise AkunError("Username atau email sudah dipakai. Silakan daftar ulang.") from e
-    return {"id": result.inserted_primary_key[0], "nama": p.nama, "username": p.username, "email": email}
+    return {"id": result.inserted_primary_key[0], "nama": p.nama, "username": p.username, "email": email,
+            "punya_sandi": True}
+
+
+# --- Lupa kata sandi: kode dikirim ke email akun → kode benar → kata sandi diganti ---
+def minta_reset(email: str):
+    """Kirim kode ganti kata sandi kalau emailnya terdaftar. Sengaja tidak memberi tahu
+    apakah email itu terdaftar atau tidak (supaya tidak bisa dipakai menebak email pengguna)."""
+    email = _rapikan_email(email)
+    now = db.utc_now()
+    with db.engine.begin() as conn:
+        user = conn.execute(select(db.users).where(db.users.c.email == email)).first()
+        if user is None:
+            return
+        lama = conn.execute(select(db.reset_sandi).where(db.reset_sandi.c.user_id == user.id)).first()
+        if lama is not None and (now - lama.dikirim).total_seconds() < KIRIM_ULANG_DETIK:
+            return  # baru saja dikirim; kode lama masih berlaku
+        kode, kode_hash = _kode_baru()
+        conn.execute(delete(db.reset_sandi).where(db.reset_sandi.c.user_id == user.id))
+        conn.execute(insert(db.reset_sandi).values(
+            user_id=user.id, kode_hash=kode_hash, kedaluwarsa=now + timedelta(minutes=KODE_MENIT), percobaan=0,
+            dikirim=now))
+    surel.kirim_kode(email, user.nama, kode, KODE_MENIT, jenis="reset")
+
+
+def reset_sandi(email: str, kode: str, password_baru: str):
+    """Kode benar → kata sandi diganti dan semua sesi login lama dikeluarkan."""
+    if not 8 <= len(password_baru) <= 128:
+        raise AkunError("Kata sandi minimal 8 karakter.")
+    email = _rapikan_email(email)
+    now = db.utc_now()
+    salah = AkunError("Kode salah atau sudah kedaluwarsa.")
+    with db.engine.begin() as conn:
+        user = conn.execute(select(db.users).where(db.users.c.email == email)).first()
+        r = user and conn.execute(select(db.reset_sandi).where(db.reset_sandi.c.user_id == user.id)).first()
+        if not r or r.kedaluwarsa < now:
+            raise salah
+        if not hmac.compare_digest(_token_hash(kode.strip()), r.kode_hash):
+            if r.percobaan + 1 >= KODE_MAKS_SALAH:
+                conn.execute(delete(db.reset_sandi).where(db.reset_sandi.c.user_id == user.id))
+            else:
+                conn.execute(update(db.reset_sandi).where(db.reset_sandi.c.user_id == user.id).values(
+                    percobaan=r.percobaan + 1))
+            ok = False
+        else:
+            conn.execute(update(db.users).where(db.users.c.id == user.id).values(
+                password_hash=_hash_password(password_baru)))
+            conn.execute(delete(db.reset_sandi).where(db.reset_sandi.c.user_id == user.id))
+            conn.execute(delete(db.sessions).where(db.sessions.c.user_id == user.id))
+            ok = True
+    if not ok:  # di luar transaksi, supaya hitungan percobaan tetap tersimpan
+        raise salah
+
+
+# --- Hapus akun (hak pengguna menurut UU PDP) ---
+def hapus_akun(user_id: int, password: str = "", konfirmasi: str = ""):
+    """Hapus akun beserta seluruh riwayat murojaahnya. Akun dengan kata sandi harus memasukkan kata
+    sandinya; akun Google (tanpa kata sandi) mengetik username-nya sebagai konfirmasi."""
+    with db.engine.connect() as conn:
+        user = conn.execute(select(db.users).where(db.users.c.id == user_id)).first()
+    if user is None:
+        raise AkunError("Akun tidak ditemukan.")
+    if user.password_hash != "!":
+        if not _verify_password(password, user.password_hash):
+            raise AkunError("Kata sandi salah.")
+    elif konfirmasi.strip().lower() != user.username:
+        raise AkunError("Ketik username kamu untuk konfirmasi.")
+    with db.engine.begin() as conn:
+        for tabel in (db.murojaah_kata, db.murojaah_ayat, db.murojaah_sesi, db.sessions, db.reset_sandi):
+            conn.execute(delete(tabel).where(tabel.c.user_id == user_id))
+        conn.execute(delete(db.users).where(db.users.c.id == user_id))
 
 
 # --- Masuk ---

@@ -13,6 +13,7 @@ const LoginPage = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(serverError);
+  const pesan = location.state?.pesan; // mis. setelah kata sandi diganti
   const [loading, setLoading] = useState(false);
 
   // Halaman yang tadi mau dibuka sebelum diminta masuk
@@ -62,6 +63,10 @@ const LoginPage = () => {
           </div>
         )}
 
+        {pesan && !error && (
+          <p role="status" className="mb-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">{pesan}</p>
+        )}
+
         <GoogleButton onCredential={handleGoogle} text="signin_with" />
 
         <form onSubmit={handleSubmit} className="space-y-5" noValidate>
@@ -73,6 +78,9 @@ const LoginPage = () => {
             label="Kata sandi" icon={Lock} value={password} onChange={setPassword}
             type="password" placeholder="••••••••" autoComplete="current-password"
           />
+          <div className="text-right -mt-2">
+            <Link to="/lupa-sandi" className="text-sm text-slate-400 hover:text-emerald-400">Lupa kata sandi?</Link>
+          </div>
           <Button type="submit" loading={loading} className="w-full py-3.5">Masuk Sekarang</Button>
         </form>
 

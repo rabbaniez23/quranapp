@@ -23,7 +23,7 @@ const LandingPage = () => {
                 <span className="italic text-emerald-400">Lebih Mudah & Terjaga</span>
               </h1>
               <p className="font-sans text-slate-400 text-lg leading-relaxed max-w-lg mx-auto lg:mx-0 font-light">
-                Teknologi AI yang menyimak bacaanmu dengan teliti. Dapatkan koreksi instan layaknya setoran hafalan dengan guru ngaji.
+                Teknologi AI yang menyimak bacaanmu dengan teliti. Dapatkan koreksi instan kata demi kata untuk membantu murojaahmu.
               </p>
             </div>
 
@@ -36,13 +36,9 @@ const LandingPage = () => {
               </Link>
             </div>
 
-            <div className="pt-4 flex items-center justify-center lg:justify-start gap-4 text-sm text-slate-500">
-              <div className="flex -space-x-2">
-                 <div className="w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-900"></div>
-                 <div className="w-8 h-8 rounded-full bg-slate-600 border-2 border-slate-900"></div>
-                 <div className="w-8 h-8 rounded-full bg-slate-500 border-2 border-slate-900"></div>
-              </div>
-              <p>Bergabung dengan 1,000+ Penghafal</p>
+            <div className="pt-4 flex items-center justify-center lg:justify-start gap-2 text-sm text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <p>Gratis selama masa uji coba</p>
             </div>
           </div>
 
@@ -56,7 +52,7 @@ const LandingPage = () => {
               <div className="flex justify-between items-center mb-8 border-b border-white/5 pb-4">
                 <div>
                    <h3 className="text-white font-serif text-lg">Surat Al-Mulk</h3>
-                   <p className="text-emerald-400 text-xs uppercase tracking-widest font-semibold">Sedang Merekam</p>
+                   <p className="text-emerald-400 text-xs uppercase tracking-widest font-semibold">Contoh tampilan</p>
                 </div>
                 <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]"></div>
               </div>
@@ -65,7 +61,7 @@ const LandingPage = () => {
               <div className="flex items-center justify-center gap-1 h-16 mb-8">
                  {[...Array(20)].map((_, i) => (
                    <div key={i} className="w-1 bg-emerald-500 rounded-full animate-pulse" style={{ 
-                     height: `${Math.random() * 100}%`,
+                     height: `${20 + ((i * 37) % 80)}%`, // tinggi tetap (bukan acak) supaya tampilan stabil
                      animationDelay: `${i * 0.05}s` 
                    }}></div>
                  ))}
@@ -76,7 +72,7 @@ const LandingPage = () => {
                   <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="text-slate-300 text-sm leading-relaxed">
-                      "MasyaAllah, bacaan ayat 1-5 sudah lancar. Perhatikan panjang mad pada ayat ke-3."
+                      "MasyaAllah, ayat 1-5 sudah lancar. Ada 1 kata di ayat ke-3 yang perlu diulang."
                     </p>
                   </div>
                 </div>
@@ -162,7 +158,7 @@ const LandingPage = () => {
         </div>
         <h2 className="font-serif text-3xl text-white mb-6">Membangun untuk Umat</h2>
         <p className="text-slate-400 leading-relaxed font-light">
-          QuranAI dibangun sebagai proyek wakaf digital. Harapannya sederhana: membantu satu orang saja untuk lebih dekat dengan Al-Quran, itu sudah menjadi kebahagiaan terbesar bagi kami.
+          TemanTahfidz dibangun dengan harapan sederhana: membantu sebanyak mungkin orang menjaga hafalan Al-Quran, kapan saja dan di mana saja. Kalau satu orang saja jadi lebih dekat dengan Al-Quran, itu sudah menjadi kebahagiaan terbesar bagi kami.
         </p>
       </section>
 

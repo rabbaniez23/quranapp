@@ -15,6 +15,17 @@ export const kirimUlangKode = (email) =>
 export const masuk = (username, password) =>
   apiFetch("/api/auth/masuk", { method: "POST", body: { username, password } });
 
+// Lupa kata sandi: kode dikirim ke email (jawaban selalu ok, terdaftar atau tidak emailnya)
+export const lupaSandi = (email) =>
+  apiFetch("/api/auth/lupa-sandi", { method: "POST", body: { email } });
+
+export const gantiSandi = (email, kode, password) =>
+  apiFetch("/api/auth/lupa-sandi/ganti", { method: "POST", body: { email, kode, password } });
+
+// Akun dengan kata sandi: isi password. Akun Google: isi konfirmasi = username.
+export const hapusAkun = (token, password, konfirmasi) =>
+  apiFetch("/api/auth/hapus-akun", { method: "POST", token, body: { password, konfirmasi } });
+
 export const masukGoogle = (credential) =>
   apiFetch("/api/auth/google", { method: "POST", body: { credential } });
 

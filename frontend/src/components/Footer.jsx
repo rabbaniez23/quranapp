@@ -47,7 +47,9 @@ const Footer = () => {
         <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row items-center justify-between text-slate-500 text-sm">
           <p>
             &copy; {new Date().getFullYear()} TemanTahfidz. All rights reserved. ·{' '}
-            <Link to="/privasi" className="hover:text-emerald-400 transition-colors">Kebijakan Privasi</Link>
+            <Link to="/privasi" className="hover:text-emerald-400 transition-colors">Kebijakan Privasi</Link> ·{' '}
+            <Link to="/ketentuan" className="hover:text-emerald-400 transition-colors">Syarat &amp; Ketentuan</Link> ·{' '}
+            <Link to="/lisensi" className="hover:text-emerald-400 transition-colors">Lisensi</Link>
           </p>
           <p className="flex items-center gap-1 mt-2 md:mt-0">
             Dibuat dengan <Heart className="w-4 h-4 text-red-500 fill-current" /> oleh Developer

@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, Clock, LayoutDashboard, Mic, Newspaper, ScrollText } from 'lucide-react';
+import { BarChart3, BookOpen, Clock, LayoutDashboard, Mic, Newspaper, ScrollText, UserCog } from 'lucide-react';
 
 // Menu aplikasi setelah masuk. "match" = alamat lain yang juga dianggap menu ini aktif.
 export const MENU = [
@@ -21,6 +21,10 @@ export const MENU = [
   {
     grup: 'Ibadah',
     items: [{ to: '/jadwal-sholat', label: 'Jadwal Sholat', icon: Clock }],
+  },
+  {
+    grup: 'Akun',
+    items: [{ to: '/akun', label: 'Akun Saya', icon: UserCog }],
   },
 ];
 
