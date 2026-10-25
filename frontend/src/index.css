@@ -16,6 +16,90 @@ body {
   animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
 }
 
+/* ===== Landing page: animasi & efek ===== */
+@keyframes naik {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: none; }
+}
+.anim-naik { animation: naik 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+/* Muncul saat digulir (kelas "muncul" ditambahkan oleh useReveal) */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.8s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition-delay: var(--delay, 0ms);
+}
+.reveal.muncul { opacity: 1; transform: none; }
+
+/* Teks emas-zamrud berkilau */
+@keyframes kilau { to { background-position: 200% center; } }
+.teks-kilau {
+  background: linear-gradient(110deg, #6ee7b7 0%, #fde68a 25%, #34d399 50%, #fde68a 75%, #6ee7b7 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: kilau 7s linear infinite;
+}
+
+/* Pola bintang delapan (khas ornamen Islami), sangat tipis */
+.pola-bintang {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'%3E%3Cg fill='none' stroke='%2334d399' stroke-opacity='0.08'%3E%3Crect x='20' y='20' width='32' height='32'/%3E%3Crect x='20' y='20' width='32' height='32' transform='rotate(45 36 36)'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Demo di kartu contoh: kata terbuka satu per satu, berulang */
+@keyframes kata-buka {
+  0%, 6% { opacity: 0; transform: translateY(6px); }
+  12%, 88% { opacity: 1; transform: none; }
+  96%, 100% { opacity: 0; }
+}
+@keyframes kata-balok {
+  0%, 6% { opacity: 1; }
+  12%, 88% { opacity: 0; }
+  96%, 100% { opacity: 1; }
+}
+.demo-kata { animation: kata-buka 8s ease-in-out infinite; }
+.demo-balok { animation: kata-balok 8s ease-in-out infinite; }
+@keyframes isi-bar { from { width: 0; } to { width: 100%; } }
+.demo-bar { animation: isi-bar 8s ease-in-out infinite; }
+
+@keyframes melayang {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+@keyframes aurora {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(6%, -5%) scale(1.08); }
+  66% { transform: translate(-5%, 4%) scale(0.96); }
+}
+/* Gerakan terus-menerus hanya di laptop (di HP cukup diam supaya ringan) */
+@media (min-width: 1024px) {
+  .lg-melayang { animation: melayang 7s ease-in-out infinite; }
+  .lg-aurora { animation: aurora 20s ease-in-out infinite; }
+}
+
+/* Kartu yang menyala mengikuti kursor (laptop) */
+.sorot { position: relative; isolation: isolate; }
+.sorot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(420px circle at var(--x, 50%) var(--y, 50%), rgb(52 211 153 / 0.12), transparent 45%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  z-index: -1;
+  pointer-events: none;
+}
+@media (hover: hover) { .sorot:hover::before { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .anim-naik, .teks-kilau, .demo-kata, .demo-balok, .demo-bar, .lg-melayang, .lg-aurora { animation: none !important; }
+  .demo-balok { opacity: 0; }
+}
+
 /* Kartu dalam daftar panjang (ayat, hadits, surat): yang masih jauh di luar layar belum digambar,
    baru digambar saat digulir mendekat. Sangat meringankan HP. */
 .cv-auto { content-visibility: auto; contain-intrinsic-size: auto 400px; }
@@ -24,7 +108,7 @@ body {
 /* Mode ringan untuk HP & tablet: efek kaca buram, cahaya blur, dan bayangan besar sangat berat
    untuk GPU HP (terasa patah-patah). Di laptop/desktop (>= 1024px) tampilan tetap seperti biasa. */
 @media (max-width: 1023px) {
-  .backdrop-blur-sm, .backdrop-blur, .backdrop-blur-md, .backdrop-blur-lg, .backdrop-blur-xl {
+  .backdrop-blur-sm, .backdrop-blur, .backdrop-blur-md, .backdrop-blur-lg, .backdrop-blur-xl, .backdrop-blur-2xl, .backdrop-blur-3xl {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }
