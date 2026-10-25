@@ -102,6 +102,20 @@ const isMatch = (spoken, target, strict = false) => {
   return score >= (len <= 3 ? 0.66 : 0.75);
 };
 
+// Mode longgar (Google): tulisan Google sering meleset 1-2 huruf dari bacaan yang sebenarnya benar
+// (tanpa harakat, hamzah/ta marbuthah beda). Kata ≥4 huruf yang ±60% sama dianggap benar,
+// asal huruf depannya tidak berbeda (وَ فَ بِ لِ كَ / al- tetap menentukan).
+const MIRIP_LONGGAR = 0.6;
+// Di bawah kemiripan ini kata yang terdengar dianggap salah dengar Google (bukan bacaan lain): diabaikan
+const BEDA_JAUH = 0.3;
+const isMatchLonggar = (spoken, target) => {
+  if (isMatch(spoken, target)) return true;
+  if (spoken[0] !== target[0] && (PREFIX_LETTERS.includes(spoken[0]) || PREFIX_LETTERS.includes(target[0]))) {
+    return false;
+  }
+  return Math.max(spoken.length, target.length) >= 4 && similarity(spoken, target) >= MIRIP_LONGGAR;
+};
+
 // --- 4. PENCOCOKAN BERURUTAN ---
 // expected  : daftar kata satu halaman [{ skeleton, wordIdx }]
 // base      : status hasil sesi mic sebelumnya { status: [], heard: [] }
@@ -110,11 +124,15 @@ const isMatch = (spoken, target, strict = false) => {
 // interimText: teks sementara (kata terakhirnya bisa masih berubah)
 // strict    : mode ketat. Kalau salah/terlewat, posisi BERHENTI di kata itu sampai dibaca benar
 //             (boleh mengulang dari awal ayat). Mode longgar menandai merah lalu lanjut.
+// longgar   : untuk Google. Teks sementara hanya boleh MEMBUKA kata (tidak pernah menyalahkan, karena
+//             tebakan sementara Google masih berubah-ubah), ejaan yang sedikit meleset diterima, dan kata
+//             yang sama sekali tidak mirip dianggap salah dengar (diabaikan).
 // Dihitung ulang dari awal sesi setiap ada hasil baru, jadi kalau Google merevisi tebakannya,
 // statusnya ikut terkoreksi.
-export const alignRecitation = (expected, base, startPos, finalText, interimText = '', { strict = false } = {}) => {
+export const alignRecitation = (expected, base, startPos, finalText, interimText = '', { strict = false, longgar = false } = {}) => {
+  const finalTokens = tokenize(finalText);
   const interimTokens = tokenize(interimText);
-  const tokens = [...tokenize(finalText), ...interimTokens];
+  const tokens = [...finalTokens, ...interimTokens];
   const status = [...base.status];
   const heard = [...base.heard];
   let pos = startPos;
@@ -151,7 +169,9 @@ export const alignRecitation = (expected, base, startPos, finalText, interimText
     const tok = tokens[i];
     const next = tokens[i + 1];
     const target = expected[pos].skeleton;
-    const isTentative = interimTokens.length > 0 && i === tokens.length - 1;
+    const isTentative = longgar
+      ? i >= finalTokens.length
+      : interimTokens.length > 0 && i === tokens.length - 1;
 
     // a. Kata yang ditunggu dibaca benar
     if (isMatch(tok.sk, target)) {
@@ -179,12 +199,23 @@ export const alignRecitation = (expected, base, startPos, finalText, interimText
     // Kata terakhir yang masih sementara: jangan dihukum dulu, tunggu Google yakin
     if (isTentative) break;
 
+    // Mode longgar: tulisan Google yang meleset sedikit tetap dihitung benar
+    if (longgar && isMatchLonggar(tok.sk, target)) {
+      markCorrect(pos);
+      pos++; i++;
+      continue;
+    }
+
     // f. Ada kata yang terlewat
     const k = findSkip(tok.sk, next);
     if (k === -1) break;
     if (strict) {
-      // Mode ketat: tandai salah dan tetap tunggu kata ini dibaca benar
-      if (k > 0 || tok.sk.length >= 2) {
+      // Mode ketat: tandai salah dan tetap tunggu kata ini dibaca benar.
+      // Longgar: kata yang sama sekali tidak mirip (dan bukan kata sesudahnya) = salah dengar Google, diabaikan.
+      // (kata pendek butuh kemiripan lebih tinggi: Google sering menyelipkan kata pendek acak seperti يا)
+      const batasBeda = Math.max(tok.sk.length, target.length) <= 3 ? 0.5 : BEDA_JAUH;
+      const dibacaLain = longgar ? similarity(tok.sk, target) >= batasBeda : tok.sk.length >= 2;
+      if (k > 0 || dibacaLain) {
         status[pos] = 'wrong';
         heard[pos] = k > 0 ? `${tok.raw} (kata ini terlewat)` : tok.raw;
       }

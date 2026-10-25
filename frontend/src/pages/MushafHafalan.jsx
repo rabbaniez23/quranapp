@@ -380,17 +380,23 @@ const MushafHafalan = () => {
     };
 
     recognition.onresult = (event) => {
-      // Ambil SEMUA hasil sesi ini, lalu cocokkan ulang dari awal sesi
-      let final = '';
-      let interim = '';
+      // Ambil SEMUA hasil sesi ini, lalu cocokkan ulang dari awal sesi.
+      // Chrome Android sering mengirim hasil baru yang MENGULANG hasil sebelumnya ("bismi", "bismi allah", ...):
+      // hasil seperti itu menggantikan yang lama, bukan ditambahkan, supaya kata tidak dobel.
+      const potongan = [];
       for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) final += ` ${event.results[i][0].transcript}`;
-        else interim += ` ${event.results[i][0].transcript}`;
+        const teks = event.results[i][0].transcript.trim();
+        if (!teks) continue;
+        const akhir = potongan[potongan.length - 1];
+        if (akhir && teks.startsWith(akhir.teks)) potongan[potongan.length - 1] = { teks, final: event.results[i].isFinal };
+        else potongan.push({ teks, final: event.results[i].isFinal });
       }
+      const final = potongan.filter(p => p.final).map(p => p.teks).join(' ');
+      const interim = potongan.filter(p => !p.final).map(p => p.teks).join(' ');
       if (!(final + interim).trim()) return;
       if (!isListeningRef.current) return;
       applyResult(alignRecitation(expectedRef.current, committedRef.current, sessionStartRef.current, final, interim,
-        { strict: true }));
+        { strict: true, longgar: true }));
     };
 
     recognition.onerror = (event) => {
